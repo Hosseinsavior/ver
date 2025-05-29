@@ -1,9 +1,9 @@
 // api/index.js
 const { Telegraf } = require('telegraf');
-const { supabase, initializeSettings } = require('../lib/database');
+const { supabase, initializeSettings, getSetting, saveSetting } = require('../lib/database');
 
 // متغیرهای محیطی
-const botToken = process.env.TELEGRAM_BOT_TOKEN || '6429865327:AAE-2pEt3tq24CLR7XxWMwXvlDpRxE59te8';
+const botToken = process.env.TELEGRAM_BOT_TOKEN || '5448614937:AAEBpW9HXTD5j6QEJcxdxtFwrdwnAWjTf20';
 const adminId = process.env.ADMIN_ID || '5059280908';
 
 // ایجاد ربات
