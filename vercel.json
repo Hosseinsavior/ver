@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "functions": {
+    "api/index.js": {
+      "memory": 128,
+      "maxDuration": 10
+    }
+  },
+  "routes": [
+    {
+      "src": "/api",
+      "dest": "/api/index.js"
+    }
+  ],
+  "env": {
+    "TELEGRAM_BOT_TOKEN": "YOUR_BOT_TOKEN",
+    "ADMIN_ID": "YOUR_ADMIN_ID",
+    "SUPABASE_URL": "YOUR_SUPABASE_URL",
+    "SUPABASE_KEY": "YOUR_SUPABASE_KEY"
+  }
+}
