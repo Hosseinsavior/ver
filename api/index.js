@@ -86,7 +86,9 @@ bot.start(async (ctx) => {
   const chatId = ctx.chat.id;
   const fromId = ctx.from.id.toString();
   const firstName = ctx.from.first_name || 'کاربر';
-  const username = ctx.from.username ? `@${ctx.from.username}` : 'VC';
+  const username = ctx.from.username ? `@${ctx.from.username}` : 'بدون یوزرنیم';
+
+  console.log(`Start command by fromId: ${fromId}, username: ${username}`);
 
   // بررسی بلاک بودن کاربر
   if (await isUserBlocked(fromId)) {
@@ -114,7 +116,7 @@ bot.start(async (ctx) => {
   await addUser(fromId, username);
 
   const startText = await getSetting('start_text', 'Hi!✋ <code>Welcome To My Bot:)</code>');
-  const msg = fromId === adminId ? 'به ربات خودتون خوش آمدید' : startText.replace('FIRSTNAME', firstName).replace('USERNAME', username);
+  const msg = fromId === adminId ? 'به ربات خودتون خوش اومدین' : startText.replace('FIRSTNAME', firstName).replace('USERNAME', username);
 
   await ctx.reply(msg, {
     parse_mode: 'HTML',
@@ -125,74 +127,107 @@ bot.start(async (ctx) => {
 // دستور بخش مدیریت
 bot.hears('✴️بخش مدیریت', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('✴️ به بخش مدیریت خوش آمدید!', {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
-    });
+  console.log(`Admin panel triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized admin access by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  await saveSetting('command', 'none');
+  await ctx.reply('✴️ به بخش مدیریت خوش آمدید!', {
+    parse_mode: 'HTML',
+    ...buttonOfficial,
+  });
 });
 
 // غیرفعال کردن حالت ادمین
 bot.hears('🔯غیرفعال کردن حالت ادمین', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('🔯 حالت ادمین غیرفعال شد.', {
-      parse_mode: 'HTML',
-      ...await getDynamicKeyboard(true),
-    });
+  console.log(`Disable admin triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized disable admin by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  await saveSetting('command', 'none');
+  await ctx.reply('🔯 حالت ادمین غیرفعال شد.', {
+    parse_mode: 'HTML',
+    ...await getDynamicKeyboard(true),
+  });
 });
 
 // پیام همگانی ساده
 bot.hears('⤴️پیام همگانی', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    await saveSetting('command', 's2a');
-    await ctx.reply('⤴️ پیام را وارد کنید:', {
-      parse_mode: 'HTML',
-      ...buttonBack,
-    });
+  console.log(`Broadcast message triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized broadcast access by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  await saveSetting('command', 's2a');
+  await ctx.reply('⤴️ پیام را وارد کنید:', {
+    parse_mode: 'HTML',
+    ...buttonBack,
+  });
+});
+
+// فوروارد همگانی
+bot.hears('🈂فوروارد همگانی', async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  console.log(`Forward broadcast triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized forward broadcast by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+  }
+  await saveSetting('command', 's2a fwd');
+  await ctx.reply('🈂 پیام را فوروارد کنید:', {
+    parse_mode: 'HTML',
+    ...buttonBack,
+  });
 });
 
 // مدیریت دکمه‌ها
 bot.hears('🔧مدیریت دکمه‌ها', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('🔲 گزینه‌ای انتخاب کنید:', {
-      parse_mode: 'HTML',
-      ...buttonDokme,
-    });
+  console.log(`Button management triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized button management by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  await saveSetting('command', 'none');
+  await ctx.reply('🔲 گزینه‌ای انتخاب کنید:', {
+    parse_mode: 'HTML',
+    ...buttonDokme,
+  });
 });
 
 bot.hears('⏸اضافه کردن دکمه', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    await saveSetting('command', 'add button');
-    await ctx.reply('⏸ نام دکمه را وارد کنید:', {
-      parse_mode: 'HTML',
-      ...buttonBack,
-    });
+  console.log(`Add button triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized add button by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  await saveSetting('command', 'add button');
+  await ctx.reply('⏸ نام دکمه را وارد کنید:', {
+    parse_mode: 'HTML',
+    ...buttonBack,
+  });
 });
 
 bot.hears('⏸حذف دکمه', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    const buttons = await getButtons();
-    const keyboard = buttons.map(b => [{ text: b.text }]);
-    keyboard.push([{ text: '↩️بازگشت' }]);
-    await saveSetting('command', 'rem button');
-    await ctx.reply('⏸ دکمه را انتخاب کنید:', {
-      parse_mode: 'HTML',
-      reply_markup: { keyboard, resize_keyboard: true },
-    });
+  console.log(`Remove button triggered by fromId: ${fromId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized remove button by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
   }
+  const buttons = await getButtons();
+  const keyboard = buttons.map(b => [{ text: b.text }]);
+  keyboard.push([{ text: '↩️بازگشت' }]);
+  await saveSetting('command', 'rem button');
+  await ctx.reply('⏸ دکمه را انتخاب کنید:', {
+    parse_mode: 'HTML',
+    reply_markup: { keyboard, resize_keyboard: true },
+  });
 });
 
 // پاسخ به دکمه‌ها و مدیریت
@@ -202,6 +237,8 @@ bot.on('text', async (ctx) => {
   const text = ctx.message.text;
   const firstName = ctx.from.first_name || 'کاربر';
   const command = await getSetting('command', 'none');
+
+  console.log(`Text received from ${fromId}: ${text}, command: ${command}`);
 
   // اضافه کردن دکمه
   if (command === 'add button' && fromId === adminId) {
@@ -258,7 +295,7 @@ bot.on('text', async (ctx) => {
       ...buttonOfficial,
     });
     const { data: users } = await supabase.from('users').select('user_id');
-    for (const user of users) {
+    for (const user of users || []) {
       try {
         await ctx.telegram.sendMessage(user.user_id, text, { parse_mode: 'HTML' });
       } catch (error) {
@@ -311,15 +348,17 @@ bot.on('message', async (ctx) => {
   const wait = await getSetting('wait', '');
   const position = await getSetting('position', 'bottom');
 
+  console.log(`Message received from ${fromId}, command: ${command}`);
+
   // فوروارد همگانی
-  if (command === 's2a fwd' && fromId === adminId && ctx.message.forward_from) {
+  if (command === 's2a fwd' && fromId === adminId) {
     await saveSetting('command', 'none');
     await ctx.reply('🈂 پیام در صف ارسال قرار گرفت.', {
       parse_mode: 'HTML',
       ...buttonOfficial,
     });
     const { data: users } = await supabase.from('users').select('user_id');
-    for (const user of users) {
+    for (const user of users || []) {
       try {
         await ctx.telegram.forwardMessage(user.user_id, ctx.chat.id, messageId);
       } catch (error) {
@@ -360,8 +399,73 @@ bot.on('message', async (ctx) => {
 // تنظیمات
 bot.hears('🔲تنظیمات', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
+  console.log(`Settings triggered by fromId: ${fromId}, adminId: ${adminId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized settings access by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+  }
+  try {
+    const settings = {
+      sticker: await getSetting('sticker', '✅'),
+      file: await getSetting('file', '✅'),
+      aks: await getSetting('aks', '✅'),
+      music: await getSetting('music', '✅'),
+      film: await getSetting('film', '✅'),
+      voice: await getSetting('voice', '✅'),
+      link: await getSetting('link', '✅'),
+      forward: await getSetting('forward', '✅'),
+      join: await getSetting('join', '✅'),
+      pm_forward: await getSetting('pm_forward', '⛔️'),
+      pm_resani: await getSetting('pm_resani', '✅'),
+    };
+    console.log('Settings loaded:', settings);
+    const buttons = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
+          [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
+          [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
+          [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
+          [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
+          [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
+          [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
+          [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
+          [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
+          [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
+          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
+        ],
+      },
+    };
+    await ctx.reply('🔧 تنظیمات ربات:', {
+      parse_mode: 'HTML',
+      ...buttons,
+    });
+  } catch (error) {
+    console.error('Error in settings:', error);
+    await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+  }
+});
+
+// مدیریت callback_query
+bot.on('callback_query', async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  const data = ctx.callbackQuery.data;
+  const messageId = ctx.callbackQuery.message.message_id;
+  const chatId = ctx.chat.id;
+
+  console.log(`Callback query from ${fromId}: ${data}`);
+
+  if (fromId !== adminId) {
+    console.log(`Unauthorized callback query by ${fromId}`);
+    return ctx.answerCbQuery('🚫 دسترسی ندارید.');
+  }
+
+  const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
+  if (settingKeys.includes(data)) {
     try {
+      const currentStatus = await getSetting(data, '✅');
+      const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
+      await saveSetting(data, newStatus);
       const settings = {
         sticker: await getSetting('sticker', '✅'),
         file: await getSetting('file', '✅'),
@@ -392,70 +496,14 @@ bot.hears('🔲تنظیمات', async (ctx) => {
           ],
         },
       };
-      await ctx.reply('🔧 تنظیمات ربات:', {
+      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
         parse_mode: 'HTML',
-        ...buttons,
+        reply_markup: buttons.reply_markup,
       });
+      await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
     } catch (error) {
-      console.error('Error in settings:', error);
-      await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
-    }
-  }
-});
-
-// مدیریت callback_query
-bot.on('callback_query', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  const data = ctx.callbackQuery.data;
-  const messageId = ctx.callbackQuery.message.message_id;
-  const chatId = ctx.chat.id;
-
-  if (fromId === adminId) {
-    const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
-    if (settingKeys.includes(data)) {
-      try {
-        const currentStatus = await getSetting(data, '✅');
-        const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
-        await saveSetting(data, newStatus);
-        const settings = {
-          sticker: await getSetting('sticker', '✅'),
-          file: await getSetting('file', '✅'),
-          aks: await getSetting('aks', '✅'),
-          music: await getSetting('music', '✅'),
-          film: await getSetting('film', '✅'),
-          voice: await getSetting('voice', '✅'),
-          link: await getSetting('link', '✅'),
-          forward: await getSetting('forward', '✅'),
-          join: await getSetting('join', '✅'),
-          pm_forward: await getSetting('pm_forward', '⛔️'),
-          pm_resani: await getSetting('pm_resani', '✅'),
-        };
-        const buttons = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-              [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-              [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-              [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-              [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-              [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-              [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-              [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-              [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-              [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-              [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
-            ],
-          },
-        };
-        await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
-          parse_mode: 'HTML',
-          reply_markup: buttons.reply_markup,
-        });
-        await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
-      } catch (error) {
-        console.error('Error in callback_query:', error);
-        await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
-      }
+      console.error('Error in callback_query:', error);
+      await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
     }
   }
 });
@@ -463,42 +511,47 @@ bot.on('callback_query', async (ctx) => {
 // آمار
 bot.hears('📊آمار', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId) {
-    try {
-      const { data: members } = await supabase.from('users').select('user_id');
-      const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
-      await ctx.reply(`📊 آمار ربات:\nکاربران: ${members ? members.length : 0}\nکاربران بلاک‌شده: ${banned ? banned.length : 0}`, {
-        parse_mode: 'HTML',
-        ...buttonOfficial,
-      });
-    } catch (error) {
-      console.error('Error in stats:', error);
-      await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
-    }
+  console.log(`Stats triggered by fromId: ${fromId}, adminId: ${adminId}`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized stats access by ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+  }
+  try {
+    const { data: members } = await supabase.from('users').select('user_id');
+    const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
+    console.log('Stats data:', { members: members?.length, banned: banned?.length });
+    await ctx.reply(`📊 آمار ربات:\nکاربران: ${members?.length || 0}\nکاربران بلاک‌شده: ${banned?.length || 0}`, {
+      parse_mode: 'HTML',
+      ...buttonOfficial,
+    });
+  } catch (error) {
+    console.error('Error in stats:', error);
+    await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
   }
 });
 
 // بلاک و آنبلاک
 bot.command('ban', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId && ctx.message.reply_to_message) {
-    const targetId = ctx.message.reply_to_message.from.id.toString();
-    if (targetId !== adminId) {
-      await blockUser(targetId);
-      await ctx.reply('🚫 کاربر بلاک شد.', { parse_mode: 'HTML' });
-    } else {
-      await ctx.reply('🚫 نمی‌توانید خودتان را بلاک کنید.', { parse_mode: 'HTML' });
-    }
+  if (fromId !== adminId || !ctx.message.reply_to_message) {
+    return ctx.reply('🚫 دسترسی ندارید یا پیامی برای پاسخ انتخاب نشده.', { parse_mode: 'HTML' });
   }
+  const targetId = ctx.message.reply_to_message.from.id.toString();
+  if (targetId === adminId) {
+    return ctx.reply('🚫 نمی‌توانید خودتان را بلاک کنید.', { parse_mode: 'HTML' });
+  }
+  await blockUser(targetId);
+  await ctx.reply('🚫 کاربر بلاک شد.', { parse_mode: 'HTML' });
 });
 
 bot.command('unban', async (ctx) => {
   const fromId = ctx.from.id.toString();
-  if (fromId === adminId && ctx.message.reply_to_message) {
-    const targetId = ctx.message.reply_to_message.from.id.toString();
-    await unblockUser(targetId);
-    await ctx.reply('✅ کاربر آنبلاک شد.', { parse_mode: 'HTML' });
+  if (fromId !== adminId || !ctx.message.reply_to_message) {
+    return ctx.reply('🚫 دسترسی ندارید یا پیامی برای پاسخ انتخاب نشده.', { parse_mode: 'HTML' });
   }
+  const targetId = ctx.message.reply_to_message.from.id.toString();
+  await unblockUser(targetId);
+  await ctx.reply('✅ کاربر آنبلاک شد.', { parse_mode: 'HTML' });
 });
 
 // مدیریت Webhook
