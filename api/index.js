@@ -38,8 +38,8 @@ const buttonOfficial = {
   reply_markup: {
     keyboard: [
       [{ text: '🔯غیرفعال کردن حالت ادمین' }],
-      [{ text: '�پیام همگانی' }, { text: '🔲تنظیمات' }],
-      [{ text: '📊آمار' }, { text: '🗳فوروارد همگانی' }],
+      [{ text: '⤴️پیام همگانی' }, { text: '🔲تنظیمات' }],
+      [{ text: '📊آمار' }, { text: '🈂فوروارد همگانی' }],
       [{ text: '🔧مدیریت دکمه‌ها' }],
     ],
     resize_keyboard: true,
@@ -48,34 +48,34 @@ const buttonOfficial = {
 
 const buttonBack = {
   reply_markup: {
-    keyboard: [[{ text: '↩بازگشت' }]],
+    keyboard: [[{ text: '↩️بازگشت' }]],
     resize_keyboard: true,
   },
 };
 
 const buttonS2A = {
   reply_markup: {
-    keyboard: [[{ text: '✅بله' }, { text: '↩بازگشت' }]],
+    keyboard: [[{ text: '✅بله' }, { text: '↩️بازگشت' }]],
     resize_keyboard: true,
   },
 };
 
 const buttonDokme = {
   reply_markup: {
-    keyboard = [
-      [{ 'text': '⏸اضافه کردن دکمه' }],
-      [{ 'text': 'حذف دکمه' }],
-      [{ 'text': '↩بازگشت' }],
+    keyboard: [
+      [{ text: '⏸اضافه کردن دکمه' }],
+      [{ text: '⏸حذف دکمه' }],
+      [{ text: '↩️بازگشت' }],
     ],
-    resize_keyboard: true],
+    resize_keyboard: true,
   },
 };
 
 const buttonPosition = {
   reply_markup: {
     keyboard: [
-      [{ text': '🔼بالا' }, { text: '🔽پایین' }],
-      [{ text: '↩بازگشت' }],
+      [{ text: '🔼بالا' }, { text: '🔽پایین' }],
+      [{ text: '↩️بازگشت' }],
     ],
     resize_keyboard: true,
   },
@@ -86,7 +86,7 @@ bot.start(async (ctx) => {
   const chatId = ctx.chat.id;
   const fromId = ctx.from.id.toString();
   const firstName = ctx.from.first_name || 'کاربر';
-  const username = ctx.from.username ? `@${ctx.from.username}` : 'بدون یوزرنیم';
+  const username = ctx.from.username ? `@${ctx.from.username}` : 'VC';
 
   // بررسی بلاک بودن کاربر
   if (await isUserBlocked(fromId)) {
@@ -114,7 +114,7 @@ bot.start(async (ctx) => {
   await addUser(fromId, username);
 
   const startText = await getSetting('start_text', 'Hi!✋ <code>Welcome To My Bot:)</code>');
-  const msg = fromId === adminId ? 'به ربات خودتون خوش اومدین' : startText.replace('FIRSTNAME', firstName).replace('USERNAME', username);
+  const msg = fromId === adminId ? 'به ربات خودتون خوش آمدید' : startText.replace('FIRSTNAME', firstName).replace('USERNAME', username);
 
   await ctx.reply(msg, {
     parse_mode: 'HTML',
@@ -141,7 +141,7 @@ bot.hears('🔯غیرفعال کردن حالت ادمین', async (ctx) => {
     await saveSetting('command', 'none');
     await ctx.reply('🔯 حالت ادمین غیرفعال شد.', {
       parse_mode: 'HTML',
-      ...await getDynamicKeyboard(true), // نمایش کیبورد پویا برای ادمین
+      ...await getDynamicKeyboard(true),
     });
   }
 });
@@ -159,7 +159,7 @@ bot.hears('⤴️پیام همگانی', async (ctx) => {
 });
 
 // مدیریت دکمه‌ها
-bot.hears('🔧مدیریت دکمه‌ها', async (ctx) {
+bot.hears('🔧مدیریت دکمه‌ها', async (ctx) => {
   const fromId = ctx.from.id.toString();
   if (fromId === adminId) {
     await saveSetting('command', 'none');
