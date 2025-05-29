@@ -230,15 +230,149 @@ bot.hears('⏸حذف دکمه', async (ctx) => {
   });
 });
 
+// تنظیمات
+bot.hears(/🔲\s*تنظیمات/, async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  console.log(`Settings triggered by fromId: ${fromId}, adminId: ${adminId}, text: "${ctx.message.text}"`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized settings access by fromId: ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+  }
+  try {
+    const settings = {
+      sticker: await getSetting('sticker', '✅'),
+      file: await getSetting('file', '✅'),
+      aks: await getSetting('aks', '✅'),
+      music: await getSetting('music', '✅'),
+      film: await getSetting('film', '✅'),
+      voice: await getSetting('voice', '✅'),
+      link: await getSetting('link', '✅'),
+      forward: await getSetting('forward', '✅'),
+      join: await getSetting('join', '✅'),
+      pm_forward: await getSetting('pm_forward', '⛔️'),
+      pm_resani: await getSetting('pm_resani', '✅'),
+    };
+    console.log('Settings loaded:', settings);
+    const buttons = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
+          [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
+          [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
+          [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
+          [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
+          [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
+          [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
+          [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
+          [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
+          [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
+          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
+        ],
+      },
+    };
+    await ctx.reply('🔧 تنظیمات ربات:', {
+      parse_mode: 'HTML',
+      ...buttons,
+    });
+  } catch (error) {
+    console.error('Error in settings:', error);
+    await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+  }
+});
+
+// آمار
+bot.hears(/📊\s*آمار/, async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  console.log(`Stats triggered by fromId: ${fromId}, adminId: ${adminId}, text: "${ctx.message.text}"`);
+  if (fromId !== adminId) {
+    console.log(`Unauthorized stats access by fromId: ${fromId}`);
+    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+  }
+  try {
+    const { data: members } = await supabase.from('users').select('user_id');
+    const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
+    console.log('Stats data:', { members: members?.length, banned: banned?.length });
+    await ctx.reply(`📊 آمار ربات:\nکاربران: ${members?.length || 0}\nکاربران بلاک‌شده: ${banned?.length || 0}`, {
+      parse_mode: 'HTML',
+      ...buttonOfficial,
+    });
+  } catch (error) {
+    console.error('Error in stats:', error);
+    await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+  }
+});
+
+// مدیریت callback_query
+bot.on('callback_query', async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  const data = ctx.callbackQuery.data;
+  const messageId = ctx.callbackQuery.message.message_id;
+  const chatId = ctx.chat.id;
+
+  console.log(`Callback query from ${fromId}: ${data}`);
+
+  if (fromId !== adminId) {
+    console.log(`Unauthorized callback query by ${fromId}`);
+    return ctx.answerCbQuery('🚫 دسترسی ندارید.');
+  }
+
+  const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
+  if (settingKeys.includes(data)) {
+    try {
+      const currentStatus = await getSetting(data, '✅');
+      const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
+      await saveSetting(data, newStatus);
+      const settings = {
+        sticker: await getSetting('sticker', '✅'),
+        file: await getSetting('file', '✅'),
+        aks: await getSetting('aks', '✅'),
+        music: await getSetting('music', '✅'),
+        film: await getSetting('film', '✅'),
+        voice: await getSetting('voice', '✅'),
+        link: await getSetting('link', '✅'),
+        forward: await getSetting('forward', '✅'),
+        join: await getSetting('join', '✅'),
+        pm_forward: await getSetting('pm_forward', '⛔️'),
+        pm_resani: await getSetting('pm_resani', '✅'),
+      };
+      const buttons = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
+            [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
+            [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
+            [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
+            [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
+            [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
+            [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
+            [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
+            [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
+            [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
+            [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
+          ],
+        },
+      };
+      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
+        parse_mode: 'HTML',
+        reply_markup: buttons.reply_markup,
+      });
+      await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
+    } catch (error) {
+      console.error('Error in callback_query:', error);
+      await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
+    }
+  }
+});
+
 // پاسخ به دکمه‌ها و مدیریت
 bot.on('text', async (ctx) => {
   const chatId = ctx.chat.id;
   const fromId = ctx.from.id.toString();
-  const text = ctx.message.text;
+  const text = ctx.message.text.trim(); // حذف فاصله‌های اضافی
   const firstName = ctx.from.first_name || 'کاربر';
   const command = await getSetting('command', 'none');
 
-  console.log(`Text received from ${fromId}: ${text}, command: ${command}`);
+  console.log(`Text received from ${fromId}: "${text}", command: ${command}, adminId: ${adminId}`);
 
   // اضافه کردن دکمه
   if (command === 'add button' && fromId === adminId) {
@@ -316,7 +450,7 @@ bot.on('text', async (ctx) => {
     } else if (button.type === 'video') {
       await ctx.telegram.sendVideo(chatId, button.content, { caption: button.caption });
     } else if (button.type === 'voice') {
-      await ctx.telegram.sendVoice(chatId, button.content, { caption: button.caption });
+      await ctx.telegram.sendVoice(chatId, button.content, { caption: button.caption' });
     }
     return;
   }
@@ -327,7 +461,6 @@ bot.on('text', async (ctx) => {
       await ctx.reply('🚫 شما از ربات بلاک شده‌اید.', { parse_mode: 'HTML' });
       return;
     }
-
     const pmResani = await getSetting('pm_resani', '✅');
     const sendText = await getSetting('send_text', '<b>Sent To My Admin!</b>');
 
@@ -340,7 +473,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// آپلود فایل برای دکمه
+// آپلود برای دکمه
 bot.on('message', async (ctx) => {
   const fromId = ctx.from.id.toString();
   const messageId = ctx.message.message_id;
@@ -352,9 +485,7 @@ bot.on('message', async (ctx) => {
 
   // فوروارد همگانی
   if (command === 's2a fwd' && fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('🈂 پیام در صف ارسال قرار گرفت.', {
-      parse_mode: 'HTML',
+    await ctx.reply('🦂 پیام در صف ارسال قرار گرفت.', {
       ...buttonOfficial,
     });
     const { data: users } = await supabase.from('users').select('user_id');
@@ -365,6 +496,7 @@ bot.on('message', async (ctx) => {
         console.error(`Error forwarding to ${user.user_id}:`, error);
       }
     }
+    await saveSetting('command', 'none');
     return;
   }
 
@@ -392,141 +524,7 @@ bot.on('message', async (ctx) => {
     }
     await addButton(wait, type, content, caption, position);
     await saveSetting('command', 'none');
-    await ctx.reply('⏸ دکمه ساخته شد.', { parse_mode: 'HTML', ...buttonDokme });
-  }
-});
-
-// تنظیمات
-bot.hears('🔲تنظیمات', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Settings triggered by fromId: ${fromId}, adminId: ${adminId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized settings access by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  try {
-    const settings = {
-      sticker: await getSetting('sticker', '✅'),
-      file: await getSetting('file', '✅'),
-      aks: await getSetting('aks', '✅'),
-      music: await getSetting('music', '✅'),
-      film: await getSetting('film', '✅'),
-      voice: await getSetting('voice', '✅'),
-      link: await getSetting('link', '✅'),
-      forward: await getSetting('forward', '✅'),
-      join: await getSetting('join', '✅'),
-      pm_forward: await getSetting('pm_forward', '⛔️'),
-      pm_resani: await getSetting('pm_resani', '✅'),
-    };
-    console.log('Settings loaded:', settings);
-    const buttons = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-          [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-          [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-          [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-          [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-          [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-          [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-          [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-          [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-          [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
-        ],
-      },
-    };
-    await ctx.reply('🔧 تنظیمات ربات:', {
-      parse_mode: 'HTML',
-      ...buttons,
-    });
-  } catch (error) {
-    console.error('Error in settings:', error);
-    await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
-  }
-});
-
-// مدیریت callback_query
-bot.on('callback_query', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  const data = ctx.callbackQuery.data;
-  const messageId = ctx.callbackQuery.message.message_id;
-  const chatId = ctx.chat.id;
-
-  console.log(`Callback query from ${fromId}: ${data}`);
-
-  if (fromId !== adminId) {
-    console.log(`Unauthorized callback query by ${fromId}`);
-    return ctx.answerCbQuery('🚫 دسترسی ندارید.');
-  }
-
-  const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
-  if (settingKeys.includes(data)) {
-    try {
-      const currentStatus = await getSetting(data, '✅');
-      const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
-      await saveSetting(data, newStatus);
-      const settings = {
-        sticker: await getSetting('sticker', '✅'),
-        file: await getSetting('file', '✅'),
-        aks: await getSetting('aks', '✅'),
-        music: await getSetting('music', '✅'),
-        film: await getSetting('film', '✅'),
-        voice: await getSetting('voice', '✅'),
-        link: await getSetting('link', '✅'),
-        forward: await getSetting('forward', '✅'),
-        join: await getSetting('join', '✅'),
-        pm_forward: await getSetting('pm_forward', '⛔️'),
-        pm_resani: await getSetting('pm_resani', '✅'),
-      };
-      const buttons = {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-            [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-            [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-            [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-            [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-            [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-            [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-            [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-            [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-            [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-            [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
-          ],
-        },
-      };
-      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
-        parse_mode: 'HTML',
-        reply_markup: buttons.reply_markup,
-      });
-      await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
-    } catch (error) {
-      console.error('Error in callback_query:', error);
-      await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
-    }
-  }
-});
-
-// آمار
-bot.hears('📊آمار', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Stats triggered by fromId: ${fromId}, adminId: ${adminId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized stats access by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  try {
-    const { data: members } = await supabase.from('users').select('user_id');
-    const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
-    console.log('Stats data:', { members: members?.length, banned: banned?.length });
-    await ctx.reply(`📊 آمار ربات:\nکاربران: ${members?.length || 0}\nکاربران بلاک‌شده: ${banned?.length || 0}`, {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
-    });
-  } catch (error) {
-    console.error('Error in stats:', error);
-    await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+    await ctx.reply('🔥 دکمه ساخته شد.', { parse_mode: 'HTML', ...buttonDokme });
   }
 });
 
@@ -538,10 +536,10 @@ bot.command('ban', async (ctx) => {
   }
   const targetId = ctx.message.reply_to_message.from.id.toString();
   if (targetId === adminId) {
-    return ctx.reply('🚫 نمی‌توانید خودتان را بلاک کنید.', { parse_mode: 'HTML' });
+    return ctx.reply('❌ نمی‌توانید خودتان را بلاک کنید.', { parse_mode: 'HTML' });
   }
   await blockUser(targetId);
-  await ctx.reply('🚫 کاربر بلاک شد.', { parse_mode: 'HTML' });
+  await ctx.reply('🔒 کاربر بلاک شد.', { parse_mode: 'HTML' });
 });
 
 bot.command('unban', async (ctx) => {
@@ -560,7 +558,7 @@ module.exports = async (req, res) => {
     await bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Error handling update:', error);
+    console.error('Error handling webhook:', error);
     res.status(500).send('Error');
   }
 };
