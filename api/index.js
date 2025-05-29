@@ -13,71 +13,69 @@ initializeSettings();
 
 // دکمه‌های پویا
 async function getDynamicKeyboard(isAdmin = false) {
-  const buttons = await getButtons();
-  const topButtons = buttons.filter(b => b.position === 'top').map(b => [{ text: b.text }]);
-  const bottomButtons = buttons.filter(b => b.position === 'bottom').map(b => [{ text: b.text }]);
-  const keyboard = [...topButtons];
-  if (isAdmin) {
-    keyboard.push([{ text: '✴️بخش مدیریت' }]);
+  try {
+    const buttons = await getButtons();
+    const topButtons = buttons.filter(b => b.position === 'top').map(b => [{ text: b.text }]);
+    const bottomButtons = buttons.filter(b => b.position === 'bottom').map(b => [{ text: b.text }]);
+    const keyboard = [...topButtons];
+    if (isAdmin) {
+      keyboard.push([{ text: '✴️بخش مدیریت' }]);
+    }
+    keyboard.push(...bottomButtons);
+    return {
+      reply_markup: {
+        keyboard,
+        resize_keyboard: true,
+      },
+    };
+  } catch (error) {
+    console.error('Error in getDynamicKeyboard:', error);
+    return { reply_markup: { keyboard: [], resize_keyboard: true } };
   }
-  keyboard.push(...bottomButtons);
-  return {
-    reply_markup: {
-      keyboard,
-      resize_keyboard: true,
-    },
-  };
 }
 
 const buttonOfficial = {
   reply_markup: {
     keyboard: [
-      [{ text: '🔯غیر فعال کردن حالت ادمین' }],
-      [{ text: '⤴️پیام همگانی' }, { text: '🔧تنظیمات' }],
-      [{ text: 'آمار' }, { text: '🈂فوروارد همگانی' }],
-      [{ text: '🔲مدیریت دکمه‌ها' }],
+      [{ text: '🔯غیرفعال کردن حالت ادمین' }],
+      [{ text: '�پیام همگانی' }, { text: '🔲تنظیمات' }],
+      [{ text: '📊آمار' }, { text: '🗳فوروارد همگانی' }],
+      [{ text: '🔧مدیریت دکمه‌ها' }],
     ],
-    resize_keyboard: true,
-  },
-};
-
-const buttonManage = {
-  reply_markup: {
-    keyboard: [[{ text: '✴️بخش مدیریت' }]],
     resize_keyboard: true,
   },
 };
 
 const buttonBack = {
   reply_markup: {
-    keyboard: [[{ text: '↩️بازگشت' }]],
+    keyboard: [[{ text: '↩بازگشت' }]],
     resize_keyboard: true,
   },
 };
 
 const buttonS2A = {
   reply_markup: {
-    keyboard: [[{ text: '✅بله' }, { text: '↩️بازگشت' }]],
+    keyboard: [[{ text: '✅بله' }, { text: '↩بازگشت' }]],
     resize_keyboard: true,
   },
 };
 
 const buttonDokme = {
   reply_markup: {
-    keyboard: [
-      [{ text: '⏸اضافه کردن دکمه' }],
-      [{ text: '⏸حذف دکمه' }],
-      [{ text: '↩️بازگشت' }],
+    ['keyboard'] = [
+      [{ 'text': '⏸اضافه کردن دکمه' }],
+      [{ 'text': 'حذف دکمه' }],
+      [{ 'text': '↩بازگشت' }],
     ],
-    resize_keyboard: true,
+    resize_keyboard: true],
   },
 };
 
 const buttonPosition = {
   reply_markup: {
     keyboard: [
-      [{ text: '🔼بالا' }, { text: '🔽پایین' }],
-      [{ text: '↩️بازگشت' }],
+      [{ text': '🔼بالا' }, { text: '🔽پایین' }],
+      [{ text: '↩بازگشت' }],
     ],
     resize_keyboard: true,
   },
@@ -137,13 +135,13 @@ bot.hears('✴️بخش مدیریت', async (ctx) => {
 });
 
 // غیرفعال کردن حالت ادمین
-bot.hears('🔯غیر فعال کردن حالت ادمین', async (ctx) => {
+bot.hears('🔯غیرفعال کردن حالت ادمین', async (ctx) => {
   const fromId = ctx.from.id.toString();
   if (fromId === adminId) {
     await saveSetting('command', 'none');
     await ctx.reply('🔯 حالت ادمین غیرفعال شد.', {
       parse_mode: 'HTML',
-      ...buttonManage,
+      ...await getDynamicKeyboard(true), // نمایش کیبورد پویا برای ادمین
     });
   }
 });
@@ -161,7 +159,7 @@ bot.hears('⤴️پیام همگانی', async (ctx) => {
 });
 
 // مدیریت دکمه‌ها
-bot.hears('🔲مدیریت دکمه‌ها', async (ctx) => {
+bot.hears('🔧مدیریت دکمه‌ها', async (ctx) {
   const fromId = ctx.from.id.toString();
   if (fromId === adminId) {
     await saveSetting('command', 'none');
@@ -360,59 +358,10 @@ bot.on('message', async (ctx) => {
 });
 
 // تنظیمات
-bot.hears('🔧تنظیمات', async (ctx) => {
+bot.hears('🔲تنظیمات', async (ctx) => {
   const fromId = ctx.from.id.toString();
   if (fromId === adminId) {
-    const settings = {
-      sticker: await getSetting('sticker', '✅'),
-      file: await getSetting('file', '✅'),
-      aks: await getSetting('aks', '✅'),
-      music: await getSetting('music', '✅'),
-      film: await getSetting('film', '✅'),
-      voice: await getSetting('voice', '✅'),
-      link: await getSetting('link', '✅'),
-      forward: await getSetting('forward', '✅'),
-      join: await getSetting('join', '✅'),
-      pm_forward: await getSetting('pm_forward', '⛔️'),
-      pm_resani: await getSetting('pm_resani', '✅'),
-    };
-    const buttons = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-          [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-          [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-          [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-          [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-          [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-          [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-          [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-          [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-          [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
-        ],
-      },
-    };
-    await ctx.reply('🔧 تنظیمات ربات:', {
-      parse_mode: 'HTML',
-      ...buttons,
-    });
-  }
-});
-
-// مدیریت callback_query
-bot.on('callback_query', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  const data = ctx.callbackQuery.data;
-  const messageId = ctx.callbackQuery.message.message_id;
-  const chatId = ctx.chat.id;
-
-  if (fromId === adminId) {
-    const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
-    if (settingKeys.includes(data)) {
-      const currentStatus = await getSetting(data, '✅');
-      const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
-      await saveSetting(data, newStatus);
+    try {
       const settings = {
         sticker: await getSetting('sticker', '✅'),
         file: await getSetting('file', '✅'),
@@ -443,25 +392,89 @@ bot.on('callback_query', async (ctx) => {
           ],
         },
       };
-      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
+      await ctx.reply('🔧 تنظیمات ربات:', {
         parse_mode: 'HTML',
-        reply_markup: buttons.reply_markup,
+        ...buttons,
       });
-      await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
+    } catch (error) {
+      console.error('Error in settings:', error);
+      await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+    }
+  }
+});
+
+// مدیریت callback_query
+bot.on('callback_query', async (ctx) => {
+  const fromId = ctx.from.id.toString();
+  const data = ctx.callbackQuery.data;
+  const messageId = ctx.callbackQuery.message.message_id;
+  const chatId = ctx.chat.id;
+
+  if (fromId === adminId) {
+    const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
+    if (settingKeys.includes(data)) {
+      try {
+        const currentStatus = await getSetting(data, '✅');
+        const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
+        await saveSetting(data, newStatus);
+        const settings = {
+          sticker: await getSetting('sticker', '✅'),
+          file: await getSetting('file', '✅'),
+          aks: await getSetting('aks', '✅'),
+          music: await getSetting('music', '✅'),
+          film: await getSetting('film', '✅'),
+          voice: await getSetting('voice', '✅'),
+          link: await getSetting('link', '✅'),
+          forward: await getSetting('forward', '✅'),
+          join: await getSetting('join', '✅'),
+          pm_forward: await getSetting('pm_forward', '⛔️'),
+          pm_resani: await getSetting('pm_resani', '✅'),
+        };
+        const buttons = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
+              [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
+              [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
+              [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
+              [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
+              [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
+              [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
+              [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
+              [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
+              [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
+              [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
+            ],
+          },
+        };
+        await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
+          parse_mode: 'HTML',
+          reply_markup: buttons.reply_markup,
+        });
+        await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
+      } catch (error) {
+        console.error('Error in callback_query:', error);
+        await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
+      }
     }
   }
 });
 
 // آمار
-bot.hears('آمار', async (ctx) => {
+bot.hears('📊آمار', async (ctx) => {
   const fromId = ctx.from.id.toString();
   if (fromId === adminId) {
-    const { data: members } = await supabase.from('users').select('user_id');
-    const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
-    await ctx.reply(`📊 آمار ربات:\nکاربران: ${members.length}\nکاربران بلاک‌شده: ${banned.length}`, {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
-    });
+    try {
+      const { data: members } = await supabase.from('users').select('user_id');
+      const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
+      await ctx.reply(`📊 آمار ربات:\nکاربران: ${members ? members.length : 0}\nکاربران بلاک‌شده: ${banned ? banned.length : 0}`, {
+        parse_mode: 'HTML',
+        ...buttonOfficial,
+      });
+    } catch (error) {
+      console.error('Error in stats:', error);
+      await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+    }
   }
 });
 
