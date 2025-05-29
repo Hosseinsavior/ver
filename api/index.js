@@ -62,7 +62,7 @@ const buttonS2A = {
 
 const buttonDokme = {
   reply_markup: {
-    ['keyboard'] = [
+    keyboard = [
       [{ 'text': '⏸اضافه کردن دکمه' }],
       [{ 'text': 'حذف دکمه' }],
       [{ 'text': '↩بازگشت' }],
