@@ -1,4 +1,3 @@
-// api/index.js
 const { Telegraf } = require('telegraf');
 const { supabase, initializeSettings, getSetting, saveSetting, addUser, isUserBlocked, blockUser, unblockUser, getButtons, addButton, removeButton } = require('../lib/database');
 
@@ -390,17 +389,18 @@ bot.hears('🔧تنظیمات', async (ctx) => {
           [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
           [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
           [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-          [{ text: `پیام‌رسانی: ${settings.pm_resania}`, callback_data: 'pm_resani' }],
+          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
         ],
       },
     };
     await ctx.reply('🔧 تنظیمات ربات:', {
-      parse_mode: 'true',
+      parse_mode: 'HTML',
       ...buttons,
     });
   }
 });
 
+// مدیریت callback_query
 bot.on('callback_query', async (ctx) => {
   const fromId = ctx.from.id.toString();
   const data = ctx.callbackQuery.data;
@@ -432,8 +432,8 @@ bot.on('callback_query', async (ctx) => {
             [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
             [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
             [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-            [{ text: `موزیک: ${settings.musics}`, callback_data: 'music' }],
-            [{ text: `ویدئو: ${settings.film}`, callback_data: 'film' }],
+            [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
+            [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
             [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
             [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
             [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
@@ -443,14 +443,13 @@ bot.on('callback_query', async (ctx) => {
           ],
         },
       };
-      await ctx.editMessageText('🔧 تنظیمات به‌روزرسانی شد:', {
-        message_id: 'messageId',
-        chat_id: chatId,
+      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
         parse_mode: 'HTML',
-        ...buttons,
+        reply_markup: buttons.reply_markup,
       });
       await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
     }
+  }
 });
 
 // آمار
@@ -481,12 +480,12 @@ bot.command('ban', async (ctx) => {
 });
 
 bot.command('unban', async (ctx) => {
-   const fromId = ctx.from.id.toString();
-   if (fromId === adminId && ctx.message.reply_to_message) {
-     const targetId = ctx.message.reply_to_message.from.id.toString();
-     await unblockUser(targetId);
-     await ctx.reply('✅ کاربر آنبلاک شد.', { parse_mode: 'HTML' });
-   }
+  const fromId = ctx.from.id.toString();
+  if (fromId === adminId && ctx.message.reply_to_message) {
+    const targetId = ctx.message.reply_to_message.from.id.toString();
+    await unblockUser(targetId);
+    await ctx.reply('✅ کاربر آنبلاک شد.', { parse_mode: 'HTML' });
+  }
 });
 
 // مدیریت Webhook
