@@ -450,7 +450,7 @@ bot.on('text', async (ctx) => {
     } else if (button.type === 'video') {
       await ctx.telegram.sendVideo(chatId, button.content, { caption: button.caption });
     } else if (button.type === 'voice') {
-      await ctx.telegram.sendVoice(chatId, button.content, { caption: button.caption' });
+      await ctx.telegram.sendVoice(chatId, button.content, { caption: button.caption });
     }
     return;
   }
