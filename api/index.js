@@ -1278,6 +1278,22 @@ bot.action('closeMeh', async (ctx) => {
 // مدیریت Webhook برای Vercel
 module.exports = async (req, res) => {
   try {
+    // لاگ کردن بدنه درخواست برای دیباگ
+    console.log('Received Webhook request body:', req.body);
+
+    // بررسی اینکه درخواست از Telegramه
+    if (!req.body || typeof req.body !== 'object') {
+      console.error('Invalid request body: Body is empty or not an object');
+      return res.status(400).send('Invalid request body');
+    }
+
+    // بررسی وجود update_id
+    if (!req.body.update_id) {
+      console.error('Invalid Telegram update: Missing update_id', req.body);
+      return res.status(400).send('Invalid Telegram update');
+    }
+
+    // پردازش آپدیت
     await bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
