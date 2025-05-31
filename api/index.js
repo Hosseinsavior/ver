@@ -1,564 +1,1287 @@
-const { Telegraf } = require('telegraf');
-const { supabase, initializeSettings, getSetting, saveSetting, addUser, isUserBlocked, blockUser, unblockUser, getButtons, addButton, removeButton } = require('../lib/database');
+require('dotenv').config(); // فعلاً کامنت شده چون ترمینال نداری. اگه بعداً نصب کردی، فعال کن
+
+const { Telegraf, Markup } = require('telegraf');
+const { MongoClient } = require('mongodb');
+const axios = require('axios');
+const sharp = require('sharp');
+const si = require('systeminformation');
+const { exec } = require('child_process');
+const fs = require('fs').promises;
+const path = require('path');
+const util = require('util');
+const execPromise = util.promisify(exec);
+const crypto = require('crypto');
+const FormData = require('form-data');
 
 // متغیرهای محیطی
-const botToken = process.env.TELEGRAM_BOT_TOKEN || '5313961355:AAHKBfPxkvqAZIT4RjkKmb8li_R7b0bInjs';
-const adminId = process.env.ADMIN_ID || '5059280908';
+const botToken = '5115356918:AAFH3T-1f2x4ZdikRQnNoOXXgonLUlwryAQ';
+const botOwner = process.env.BOT_OWNER || '5059280908';
+const updatesChannel = process.env.UPDATES_CHANNEL || '';
+const logChannel = process.env.LOG_CHANNEL || '';
+const downPath = process.env.DOWN_PATH || './downloads';
+const timeGap = parseInt(process.env.TIME_GAP) || 5;
+const maxVideos = parseInt(process.env.MAX_VIDEOS) || 5;
+const streamtapeUsername = process.env.STREAMTAPE_API_USERNAME;
+const streamtapePass = process.env.STREAMTAPE_API_PASS;
+const mongoUri = 'mongodb+srv://saviorsann:TDzeYsGIJwvVkRy4@cluster0.9otjsyr.mongodb.net/video_merge_bot?retryWrites=true&w=majority';
+if (!mongoUri) {
+  console.error('MONGODB_URI is not defined');
+  if (botOwner) {
+    const bot = new Telegraf(botToken);
+    bot.telegram.sendMessage(botOwner, 'Error: MONGODB_URI is not defined. Please set it in Vercel environment variables.')
+      .catch((err) => console.error('Failed to notify owner:', err));
+  }
+  throw new Error('MONGODB_URI is not defined');
+}
+const broadcastAsCopy = process.env.BROADCAST_AS_COPY === 'true';
+const captionTemplate = process.env.CAPTION_TEMPLATE || 'Video Merged by {botUsername}\n\nMade by @Savior_128';
 
-// ایجاد ربات
-const bot = new Telegraf(botToken);
-
-// مقداردهی اولیه تنظیمات
-initializeSettings();
-
-// دکمه‌های پویا
-async function getDynamicKeyboard(isAdmin = false) {
+// MongoDB اتصال
+let db;
+async function connectMongoDB() {
   try {
-    const buttons = await getButtons();
-    const topButtons = buttons.filter(b => b.position === 'top').map(b => [{ text: b.text }]);
-    const bottomButtons = buttons.filter(b => b.position === 'bottom').map(b => [{ text: b.text }]);
-    const keyboard = [...topButtons];
-    if (isAdmin) {
-      keyboard.push([{ text: '✴️بخش مدیریت' }]);
+    console.log('MONGODB_URI value:', mongoUri);
+    console.log('Attempting to connect to MongoDB...');
+console.log('Connected to MongoDB successfully');
+    const client = await MongoClient.connect(mongoUri, { useUnifiedTopology: true });
+    db = client.db('video_merge_bot');
+    console.log('Connected to MongoDB');
+    if (botOwner) {
+      const botInstance = new Telegraf(botToken);
+      await botInstance.telegram.sendMessage(botOwner, 'Successfully connected to MongoDB!')
+        .catch((err) => console.error('Failed to notify owner:', err));
     }
-    keyboard.push(...bottomButtons);
-    return {
-      reply_markup: {
-        keyboard,
-        resize_keyboard: true,
-      },
-    };
-  } catch (error) {
-    console.error('Error in getDynamicKeyboard:', error);
-    return { reply_markup: { keyboard: [], resize_keyboard: true } };
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    if (botOwner) {
+      const botInstance = new Telegraf(botToken);
+      await botInstance.telegram.sendMessage(botOwner, `MongoDB connection failed: ${err.message}`)
+        .catch((e) => console.error('Failed to notify owner:', e));
+    }
+    throw err;
   }
 }
 
-const buttonOfficial = {
-  reply_markup: {
-    keyboard: [
-      [{ text: '🔯غیرفعال کردن حالت ادمین' }],
-      [{ text: '⤴️پیام همگانی' }, { text: '🔲تنظیمات' }],
-      [{ text: '📊آمار' }, { text: '🈂فوروارد همگانی' }],
-      [{ text: '🔧مدیریت دکمه‌ها' }],
-    ],
-    resize_keyboard: true,
-  },
-};
+// ربات
+const bot = new Telegraf(botToken);
 
-const buttonBack = {
-  reply_markup: {
-    keyboard: [[{ text: '↩️بازگشت' }]],
-    resize_keyboard: true,
-  },
-};
+// دیتابیس و صف‌ها
+const QueueDB = {};
+const ReplyDB = {};
+const FormatDB = {};
+const TimeGaps = {};
+const broadcastIds = {};
+const BROADCAST_LOG_FILE = 'broadcast.txt';
 
-const buttonS2A = {
-  reply_markup: {
-    keyboard: [[{ text: '✅بله' }, { text: '↩️بازگشت' }]],
-    resize_keyboard: true,
-  },
-};
+// ایجاد پوشه دانلود
+async function ensureDir(userId) {
+  const dir = path.join(downPath, userId.toString());
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
 
-const buttonDokme = {
-  reply_markup: {
-    keyboard: [
-      [{ text: '⏸اضافه کردن دکمه' }],
-      [{ text: '⏸حذف دکمه' }],
-      [{ text: '↩️بازگشت' }],
-    ],
-    resize_keyboard: true,
-  },
-};
+// دکمه‌های اینلاین
+async function createReplyMarkup() {
+  try {
+    return Markup.inlineKeyboard([
+      [Markup.button.url('Developer - @Savior_128', 'https://t.me/Savior_128')],
+      [
+        Markup.button.url('Support Group', 'https://t.me/Savior_128'),
+        Markup.button.url('Bots Channel', 'https://t.me/Discovery_Updates'),
+      ],
+    ]);
+  } catch (error) {
+    console.error('Create reply markup error:', error);
+    return null;
+  }
+}
 
-const buttonPosition = {
-  reply_markup: {
-    keyboard: [
-      [{ text: '🔼بالا' }, { text: '🔽پایین' }],
-      [{ text: '↩️بازگشت' }],
-    ],
-    resize_keyboard: true,
-  },
-};
+// افزودن کاربر به دیتابیس
+async function addUserToDatabase(ctx) {
+  try {
+    // بررسی اتصال به دیتابیس
+    if (!db) {
+      console.error('Database not connected in addUserToDatabase');
+      await ctx.reply(
+        'Sorry, the bot cannot connect to the database right now. Please try again later or contact the [Support Group](https://t.me/Savior_128).',
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
+      );
+      return; // توقف اجرا اگه دیتابیس متصل نباشه
+    }
+
+    const userId = ctx.from.id;
+    console.log(`Checking if user ${userId} exists in the database...`); // لاگ برای دیباگ
+    const userExists = await db.collection('users').findOne({ id: userId });
+    
+    if (!userExists) {
+      console.log(`User ${userId} does not exist. Adding to database...`); // لاگ برای دیباگ
+      await db.collection('users').insertOne({
+        id: userId,
+        join_date: new Date().toISOString().split('T')[0],
+        upload_as_doc: false,
+        thumbnail: null,
+        generate_ss: false,
+        generate_sample_video: false,
+        username: ctx.from.username || 'unknown',
+        updated_at: new Date(),
+      });
+      console.log(`User ${userId} added to database successfully.`); // لاگ برای دیباگ
+
+      // ارسال پیام به کانال لاگ اگه تنظیم شده باشه
+      if (logChannel) {
+        const botUsername = (await ctx.telegram.getMe()).username;
+        await ctx.telegram.sendMessage(
+          logChannel,
+          `#NEW_USER: \n\nNew User [${ctx.from.first_name}](tg://user?id=${userId}) started @${botUsername} !!`,
+          { parse_mode: 'Markdown' }
+        );
+        console.log(`Sent new user notification to log channel for user ${userId}.`); // لاگ برای دیباگ
+      }
+    } else {
+      console.log(`User ${userId} already exists in the database.`); // لاگ برای دیباگ
+    }
+  } catch (error) {
+    console.error('Add user error:', error);
+    await ctx.reply(
+      'An error occurred while adding you to the database. Please try again later or contact the [Support Group](https://t.me/Savior_128).',
+      { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+  }
+}
+// بررسی عضویت در کانال
+async function forceSub(ctx) {
+  if (!updatesChannel) return 200;
+  const chatId = updatesChannel.startsWith('-100') ? parseInt(updatesChannel) : updatesChannel;
+
+  try {
+    const user = await ctx.telegram.getChatMember(chatId, ctx.from.id);
+    if (user.status === 'kicked') {
+      await ctx.reply(
+        'Sorry Sir, You are Banned to use me. Contact my [Support Group](https://t.me/Savior_128).',
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
+      );
+      return 400;
+    }
+    if (['member', 'administrator', 'creator'].includes(user.status)) return 200;
+
+    const inviteLink = await ctx.telegram.exportChatInviteLink(chatId);
+    await ctx.reply(
+      '**Please Join My Updates Channel to use this Bot!**\n\nDue to Overload, Only Channel Subscribers can use the Bot!',
+      {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.url('🤖 Join Updates Channel', inviteLink)],
+          [Markup.button.callback('🔄 Refresh 🔄', 'refreshFsub')],
+        ]),
+        parse_mode: 'Markdown',
+      }
+    );
+    return 400;
+  } catch (error) {
+    if (error.response?.error_code === 429) {
+      await new Promise((resolve) => setTimeout(resolve, error.response.parameters.retry_after * 1000));
+      return forceSub(ctx);
+    }
+    console.error('ForceSub error:', error);
+    await ctx.reply(
+      `Something went wrong: ${error.message}\nContact my [Support Group](https://t.me/Savior_128).`,
+      { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+    return 400;
+  }
+}
+
+// بررسی فاصله زمانی
+async function checkTimeGap(userId) {
+  const currentTime = Date.now() / 1000;
+  const userIdStr = userId.toString();
+  if (TimeGaps[userIdStr]) {
+    const previousTime = TimeGaps[userIdStr];
+    const elapsedTime = currentTime - previousTime;
+    if (elapsedTime < timeGap) {
+      return { isInGap: true, sleepTime: Math.round(timeGap - elapsedTime) };
+    } else {
+      delete TimeGaps[userIdStr];
+    }
+  }
+  TimeGaps[userIdStr] = currentTime;
+  return { isInGap: false, sleepTime: null };
+}
+
+// دیتابیس: تنظیمات
+async function getUploadAsDoc(userId) {
+  if (!db) throw new Error('Database not connected');
+  const user = await db.collection('users').findOne({ id: userId });
+  return user?.upload_as_doc || false;
+}
+
+async function setUploadAsDoc(userId, uploadAsDoc) {
+  if (!db) throw new Error('Database not connected');
+  await db.collection('users').updateOne(
+    { id: userId },
+    { $set: { upload_as_doc: uploadAsDoc, updated_at: new Date() } }
+  );
+}
+
+async function getGenerateSampleVideo(userId) {
+  if (!db) throw new Error('Database not connected');
+  const user = await db.collection('users').findOne({ id: userId });
+  return user?.generate_sample_video || false;
+}
+
+async function setGenerateSampleVideo(userId, generateSampleVideo) {
+  if (!db) throw new Error('Database not connected');
+  await db.collection('users').updateOne(
+    { id: userId },
+    { $set: { generate_sample_video: generateSampleVideo, updated_at: new Date() } }
+  );
+}
+
+async function getGenerateSs(userId) {
+  if (!db) throw new Error('Database not connected');
+  const user = await db.collection('users').findOne({ id: userId });
+  return user?.generate_ss || false;
+}
+
+async function setGenerateSs(userId, generateSs) {
+  if (!db) throw new Error('Database not connected');
+  await db.collection('users').updateOne(
+    { id: userId },
+    { $set: { generate_ss: generateSs, updated_at: new Date() } }
+  );
+}
+
+async function setThumbnail(userId, fileId) {
+  if (!db) throw new Error('Database not connected');
+  await db.collection('users').updateOne(
+    { id: userId },
+    { $set: { thumbnail: fileId, updated_at: new Date() } }
+  );
+}
+
+async function getThumbnail(userId) {
+  if (!db) throw new Error('Database not connected');
+  const user = await db.collection('users').findOne({ id: userId });
+  return user?.thumbnail || null;
+}
+
+async function deleteUser(userId) {
+  if (!db) throw new Error('Database not connected');
+  await db.collection('users').deleteOne({ id: userId });
+}
+
+async function getAllUsers() {
+  if (!db) throw new Error('Database not connected');
+  const users = await db.collection('users').find({}).toArray();
+  return users;
+}
+
+async function totalUsersCount() {
+  if (!db) throw new Error('Database not connected');
+  return await db.collection('users').countDocuments({});
+}
+
+// دکمه‌های صف
+async function makeButtons(ctx, message, dbQueue) {
+  const markup = [];
+  try {
+    const messages = await ctx.telegram.getMessages(message.chat.id, dbQueue[message.from.id] || []);
+    for (const msg of messages) {
+      const media = msg.video || msg.document;
+      if (media) {
+        markup.push([Markup.button.callback(media.file_name || 'unnamed_file', `showFileName_${msg.message_id}`)]);
+      }
+    }
+    markup.push([Markup.button.callback('Merge Now', 'mergeNow')]);
+    markup.push([Markup.button.callback('Clear Files', 'cancelProcess')]);
+  } catch (error) {
+    console.error('Make buttons error:', error);
+  }
+  return markup;
+}
+
+// Streamtape
+async function uploadToStreamtape(file, ctx, fileSize) {
+  try {
+    const mainApi = `https://api.streamtape.com/file/ul?login=${streamtapeUsername}&key=${streamtapePass}`;
+    const hitApi = await axios.get(mainApi);
+    const jsonData = hitApi.data;
+
+    if (jsonData.result?.url) {
+      const formData = new FormData();
+      formData.append('file1', require('fs').createReadStream(file));
+      const response = await axios.post(jsonData.result.url, formData, {
+        headers: formData.getHeaders(),
+      });
+      const data = response.data;
+
+      if (data.result?.url) {
+        const downloadLink = data.result.url;
+        const filename = path.basename(file).replace('_', ' ');
+        const textEdit = `File Uploaded to Streamtape!\n\n` +
+          `**File Name:** \`${filename}\`\n` +
+          `**Size:** \`${humanbytes(fileSize)}\`\n` +
+          `**Link:** \`${downloadLink}\``;
+        try {
+          await ctx.editMessageText(textEdit, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true,
+            reply_markup: Markup.inlineKeyboard([[Markup.button.url('Open Link', downloadLink)]]),
+          });
+        } catch (editError) {
+          await ctx.reply(textEdit, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true,
+            reply_markup: Markup.inlineKeyboard([[Markup.button.url('Open Link', downloadLink)]]),
+          });
+        }
+      } else {
+        throw new Error('Failed to retrieve download link from Streamtape.');
+      }
+    } else {
+      throw new Error('Failed to authenticate with Streamtape API.');
+    }
+  } catch (error) {
+    console.error('Streamtape error:', error);
+    try {
+      await ctx.reply(
+        'Sorry, Something went wrong!\n\nCan\'t Upload to Streamtape. You can report at [Support Group](https://t.me/Savior_128).',
+        { parse_mode: 'Markdown' }
+      );
+    } catch (replyError) {
+      console.error('Reply error:', replyError);
+    }
+  }
+}
+
+// FFmpeg
+async function runFffmpegCommand(command) {
+  try {
+    const { stdout, stderr } = await execPromise(command.join(' '));
+    console.log('FFmpeg stdout:', stdout);
+    if (stderr) console.log('FFmpeg stderr:', stderr);
+    return { stdout, stderr };
+  } catch (error) {
+    console.error('FFmpeg error:', error);
+    throw error;
+  }
+}
+
+async function mergeVideo(inputFile, userId, ctx, format) {
+  const outputVid = path.join(downPath, userId.toString(), `[@Savior_128]_Merged.${format.toLowerCase()}`);
+  const command = [
+    'ffmpeg',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    inputFile,
+    '-c',
+    'copy',
+    outputVid,
+  ];
+
+  try {
+    await ctx.editMessageText('Merging Video Now ...\n\nPlease Keep Patience ...');
+    await runFffmpegCommand(command);
+    if (await fs.access(outputVid).then(() => true).catch(() => false)) {
+      return outputVid;
+    }
+    console.log('Merged video file does not exist.');
+    return null;
+  } catch (error) {
+    try {
+      await ctx.editMessageText(`An error occurred while merging videos: ${error.message}`);
+    } catch (editError) {
+      await ctx.reply(`An error occurred while merging videos: ${error.message}`);
+    }
+    return null;
+  }
+}
+
+async function cutSmallVideo(videoFile, outputDirectory, startTime, endTime, format) {
+  const outputFileName = path.join(outputDirectory, `${Date.now()}.${format.toLowerCase()}`);
+  const command = [
+    'ffmpeg',
+    '-i',
+    videoFile,
+    '-ss',
+    startTime.toString(),
+    '-to',
+    endTime.toString(),
+    '-async',
+    '1',
+    '-strict',
+    '-2',
+    outputFileName,
+  ];
+
+  try {
+    await runFffmpegCommand(command);
+    if (await fs.access(outputFileName).then(() => true).catch(() => false)) {
+      return outputFileName;
+    }
+    console.log('Cut video file does not exist.');
+    return null;
+  } catch (error) {
+    console.error('Cut video error:', error);
+    return null;
+  }
+}
+
+async function generateScreenshots(videoFile, outputDirectory, noOfPhotos, duration) {
+  if (duration <= 0 || noOfPhotos <= 0) {
+    console.log('Invalid duration or number of photos.');
+    return [];
+  }
+
+  const images = [];
+  const ttlStep = duration / noOfPhotos;
+  let currentTtl = ttlStep;
+
+  for (let i = 0; i < noOfPhotos; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const videoThumbnail = path.join(outputDirectory, `${Date.now()}.jpg`);
+    const command = [
+      'ffmpeg',
+      '-ss',
+      Math.round(currentTtl).toString(),
+      '-i',
+      videoFile,
+      '-vframes',
+      '1',
+      videoThumbnail,
+    ];
+
+    try {
+      await runFffmpegCommand(command);
+      if (await fs.access(videoThumbnail).then(() => true).catch(() => false)) {
+        images.push(videoThumbnail);
+      }
+    } catch (error) {
+      console.error('Screenshot error:', error);
+    }
+    currentTtl += ttlStep;
+  }
+  return images;
+}
+
+// پیشرفت
+async function progressForTelegraf(current, total, udType, ctx, start) {
+  if (current >= total) return true;
+
+  const now = Date.now() / 1000;
+  const diff = now - start;
+
+  if (Math.round(diff % 10) === 0) {
+    const percentage = (current / total) * 100;
+    const speed = diff > 0 ? current / diff : 0;
+    const elapsedTime = Math.round(diff) * 1000;
+    const timeToCompletion = speed > 0 ? Math.round(((total - current) / speed) * 1000) : 0;
+    const estimatedTotalTime = elapsedTime + timeToCompletion;
+
+    const progressBar = '[' +
+      '●'.repeat(Math.floor(percentage / 5)) +
+      '○'.repeat(20 - Math.floor(percentage / 5)) +
+      ']';
+
+    const progressMessage = `Percentage: ${percentage.toFixed(2)}%\n` +
+      `Done: ${humanbytes(current)}\n` +
+      `Total: ${humanbytes(total)}\n` +
+      `Speed: ${humanbytes(speed)}/s\n` +
+      `ETA: ${timeFormatter(estimatedTotalTime) || '0 s'}`;
+
+    try {
+      await ctx.editMessageText(
+        `**${udType}**\n\n${progressBar}\n${progressMessage}`,
+        { parse_mode: 'Markdown' }
+      );
+      return true;
+    } catch (error) {
+      console.error('Progress update error:', error);
+      return false;
+    }
+  }
+  return true;
+}
+
+function humanbytes(size) {
+  if (size === 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let n = 0;
+  while (size > 1024 && n < units.length - 1) {
+    size /= 1024;
+    n++;
+  }
+  return `${size.toFixed(2)} ${units[n]}`;
+}
+
+function timeFormatter(milliseconds) {
+  if (!milliseconds) return '';
+  const seconds = Math.floor(milliseconds / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours % 24) parts.push(`${hours % 24}h`);
+  if (minutes % 60) parts.push(`${minutes % 60}m`);
+  if (seconds % 60) parts.push(`${seconds % 60}s`);
+  if (milliseconds % 1000) parts.push(`${milliseconds % 1000}ms`);
+  return parts.join(', ');
+}
+
+function formatTimespan(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hours ? `${hours}h ` : ''}${minutes ? `${minutes}m ` : ''}${secs}s`;
+}
+
+// آپلود ویدیو
+async function uploadVideo(ctx, filePath, width, height, duration, thumbnail, fileSize, startTime) {
+  try {
+    const isUploadAsDoc = await getUploadAsDoc(ctx.from.id);
+    const botUsername = (await ctx.telegram.getMe()).username;
+    const fileName = path.basename(filePath);
+    const caption = captionTemplate.replace('{botUsername}', `@${botUsername}`) +
+      `\n\n**File Name:** \`${fileName}\`\n**Duration:** \`${formatTimespan(duration)}\`\n**File Size:** \`${humanbytes(fileSize)}\``;
+    let sent;
+
+    if (!isUploadAsDoc) {
+      sent = await ctx.telegram.sendVideo(
+        ctx.chat.id,
+        { source: filePath },
+        {
+          width,
+          height,
+          duration,
+          thumb: thumbnail,
+          caption,
+          parse_mode: 'Markdown',
+          reply_markup: await createReplyMarkup(),
+          progress: (current, total) => progressForTelegraf(current, total, 'Uploading Video ...', ctx, startTime),
+        }
+      );
+    } else {
+      sent = await ctx.telegram.sendDocument(
+        ctx.chat.id,
+        { source: filePath },
+        {
+          thumb: thumbnail,
+          caption,
+          parse_mode: 'Markdown',
+          reply_markup: await createReplyMarkup(),
+          progress: (current, total) => progressForTelegraf(current, total, 'Uploading Video ...', ctx, startTime),
+        }
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, timeGap * 1000));
+    if (logChannel) {
+      const forwarded = await sent.copy(logChannel);
+      await ctx.telegram.sendMessage(
+        logChannel,
+        `**User:** [${ctx.from.first_name}](tg://user?id=${ctx.from.id})\n**Username:** @${ctx.from.username || 'None'}\n**UserID:** \`${ctx.from.id}\``,
+        { reply_to_message_id: forwarded.message_id, parse_mode: 'Markdown', disable_web_page_preview: true }
+      );
+    }
+
+    await ctx.editMessageText('Video uploaded successfully!');
+  } catch (error) {
+    console.error('Upload error:', error);
+    try {
+      await ctx.editMessageText(`Failed to upload video!\nError: ${error.message}`);
+    } catch (editError) {
+      await ctx.reply(`Failed to upload video!\nError: ${error.message}`);
+    }
+  }
+}
 
 // دستور /start
 bot.start(async (ctx) => {
-  const chatId = ctx.chat.id;
-  const fromId = ctx.from.id.toString();
-  const firstName = ctx.from.first_name || 'کاربر';
-  const username = ctx.from.username ? `@${ctx.from.username}` : 'بدون یوزرنیم';
-
-  console.log(`Start command by fromId: ${fromId}, username: ${username}`);
-
-  // بررسی بلاک بودن کاربر
-  if (await isUserBlocked(fromId)) {
-    await ctx.reply('🚫 شما از ربات بلاک شده‌اید.', { parse_mode: 'HTML' });
-    return;
-  }
-
-  // بررسی قفل کانال
-  const channelLock = await getSetting('channel_lock', '');
-  if (channelLock && fromId !== adminId) {
-    try {
-      const member = await ctx.telegram.getChatMember(channelLock, fromId);
-      if (!['member', 'creator', 'administrator'].includes(member.status)) {
-        await ctx.reply(`برای استفاده از ربات، در کانال ${channelLock} عضو شوید و سپس /start کنید.`, {
-          parse_mode: 'HTML',
-        });
-        return;
-      }
-    } catch (error) {
-      console.error('Error checking channel membership:', error);
-    }
-  }
-
-  // افزودن کاربر جدید
-  await addUser(fromId, username);
-
-  const startText = await getSetting('start_text', 'Hi!✋ <code>Welcome To My Bot:)</code>');
-  const msg = fromId === adminId ? 'به ربات خودتون خوش اومدین' : startText.replace('FIRSTNAME', firstName).replace('USERNAME', username);
-
-  await ctx.reply(msg, {
-    parse_mode: 'HTML',
-    ...(fromId === adminId ? buttonOfficial : await getDynamicKeyboard()),
-  });
-});
-
-// دستور بخش مدیریت
-bot.hears('✴️بخش مدیریت', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Admin panel triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized admin access by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 'none');
-  await ctx.reply('✴️ به بخش مدیریت خوش آمدید!', {
-    parse_mode: 'HTML',
-    ...buttonOfficial,
-  });
-});
-
-// غیرفعال کردن حالت ادمین
-bot.hears('🔯غیرفعال کردن حالت ادمین', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Disable admin triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized disable admin by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 'none');
-  await ctx.reply('🔯 حالت ادمین غیرفعال شد.', {
-    parse_mode: 'HTML',
-    ...await getDynamicKeyboard(true),
-  });
-});
-
-// پیام همگانی ساده
-bot.hears('⤴️پیام همگانی', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Broadcast message triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized broadcast access by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 's2a');
-  await ctx.reply('⤴️ پیام را وارد کنید:', {
-    parse_mode: 'HTML',
-    ...buttonBack,
-  });
-});
-
-// فوروارد همگانی
-bot.hears('🈂فوروارد همگانی', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Forward broadcast triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized forward broadcast by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 's2a fwd');
-  await ctx.reply('🈂 پیام را فوروارد کنید:', {
-    parse_mode: 'HTML',
-    ...buttonBack,
-  });
-});
-
-// مدیریت دکمه‌ها
-bot.hears('🔧مدیریت دکمه‌ها', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Button management triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized button management by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 'none');
-  await ctx.reply('🔲 گزینه‌ای انتخاب کنید:', {
-    parse_mode: 'HTML',
-    ...buttonDokme,
-  });
-});
-
-bot.hears('⏸اضافه کردن دکمه', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Add button triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized add button by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  await saveSetting('command', 'add button');
-  await ctx.reply('⏸ نام دکمه را وارد کنید:', {
-    parse_mode: 'HTML',
-    ...buttonBack,
-  });
-});
-
-bot.hears('⏸حذف دکمه', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Remove button triggered by fromId: ${fromId}`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized remove button by ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  const buttons = await getButtons();
-  const keyboard = buttons.map(b => [{ text: b.text }]);
-  keyboard.push([{ text: '↩️بازگشت' }]);
-  await saveSetting('command', 'rem button');
-  await ctx.reply('⏸ دکمه را انتخاب کنید:', {
-    parse_mode: 'HTML',
-    reply_markup: { keyboard, resize_keyboard: true },
-  });
-});
-
-// تنظیمات
-bot.hears(/🔲\s*تنظیمات/, async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Settings triggered by fromId: ${fromId}, adminId: ${adminId}, text: "${ctx.message.text}"`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized settings access by fromId: ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
-  }
-  try {
-    const settings = {
-      sticker: await getSetting('sticker', '✅'),
-      file: await getSetting('file', '✅'),
-      aks: await getSetting('aks', '✅'),
-      music: await getSetting('music', '✅'),
-      film: await getSetting('film', '✅'),
-      voice: await getSetting('voice', '✅'),
-      link: await getSetting('link', '✅'),
-      forward: await getSetting('forward', '✅'),
-      join: await getSetting('join', '✅'),
-      pm_forward: await getSetting('pm_forward', '⛔️'),
-      pm_resani: await getSetting('pm_resani', '✅'),
-    };
-    console.log('Settings loaded:', settings);
-    const buttons = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-          [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-          [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-          [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-          [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-          [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-          [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-          [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-          [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-          [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-          [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
+  await addUserToDatabase(ctx);
+  if ((await forceSub(ctx)) !== 200) return;
+  await ctx.reply(
+    `Hi Unkil, I am Video Merge Bot!\nI can Merge Multiple Videos in One Video. Video Formats should be same.\n\nMade by @Savior_128`,
+    {
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.url('Developer - @Savior_128', 'https://t.me/Savior_128')],
+        [
+          Markup.button.url('Support Group', 'https://t.me/Savior_128'),
+          Markup.button.url('Bots Channel', 'https://t.me/Discovery_Updates'),
         ],
-      },
-    };
-    await ctx.reply('🔧 تنظیمات ربات:', {
-      parse_mode: 'HTML',
-      ...buttons,
-    });
-  } catch (error) {
-    console.error('Error in settings:', error);
-    await ctx.reply('❌ خطا در بارگذاری تنظیمات. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
-  }
+        [Markup.button.callback('Open Settings', 'openSettings')],
+        [Markup.button.callback('Close', 'closeMeh')],
+      ]),
+    }
+  );
 });
 
-// آمار
-bot.hears(/📊\s*آمار/, async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  console.log(`Stats triggered by fromId: ${fromId}, adminId: ${adminId}, text: "${ctx.message.text}"`);
-  if (fromId !== adminId) {
-    console.log(`Unauthorized stats access by fromId: ${fromId}`);
-    return ctx.reply('🚫 دسترسی ندارید.', { parse_mode: 'HTML' });
+// مدیریت ویدیوها
+bot.on('video', async (ctx) => {
+  await addUserToDatabase(ctx);
+  if ((await forceSub(ctx)) !== 200) return;
+  const file = ctx.message.video;
+  const fileName = file.file_name || 'video.mp4';
+  const extension = fileName.split('.').pop().toLowerCase();
+
+  if (!['mp4', 'mkv', 'webm'].includes(extension)) {
+    return ctx.reply('Only MP4, MKV, or WEBM videos are allowed!', { reply_to_message_id: ctx.message.message_id });
   }
+
+  if (!FormatDB[ctx.from.id]) FormatDB[ctx.from.id] = extension;
+  if (FormatDB[ctx.from.id] !== extension) {
+    return ctx.reply(`Please send only ${FormatDB[ctx.from.id].toUpperCase()} videos!`, { reply_to_message_id: ctx.message.message_id });
+  }
+
+  const inputFile = path.join(downPath, ctx.from.id.toString(), 'input.txt');
+  if (await fs.access(inputFile).then(() => true).catch(() => false)) {
+    return ctx.reply('A process is already running! Please wait.');
+  }
+
+  const { isInGap, sleepTime } = await checkTimeGap(ctx.from.id);
+  if (isInGap) {
+    return ctx.reply(`No flooding! Wait ${sleepTime}s before sending another video.`, { reply_to_message_id: ctx.message.message_id });
+  }
+
+  if (!QueueDB[ctx.from.id]) QueueDB[ctx.from.id] = [];
+  if (QueueDB[ctx.from.id].length >= maxVideos) {
+    return ctx.reply(`Max ${maxVideos} videos allowed! Press Merge Now.`, {
+      reply_markup: Markup.inlineKeyboard([[Markup.button.callback('Merge Now', 'mergeNow')]]),
+    });
+  }
+
+  QueueDB[ctx.from.id].push(ctx.message.message_id);
+  const messageText = QueueDB[ctx.from.id].length === maxVideos ? 'Press Merge Now!' : 'Send next video or press Merge Now!';
+  const markup = await makeButtons(ctx, ctx.message, QueueDB);
+
+  const editable = await ctx.reply('Adding video to queue...', { reply_to_message_id: ctx.message.message_id });
+  await new Promise((resolve) => setTimeout(resolve, timeGap * 1000));
   try {
-    const { data: members } = await supabase.from('users').select('user_id');
-    const { data: banned } = await supabase.from('users').select('user_id').eq('is_blocked', true);
-    console.log('Stats data:', { members: members?.length, banned: banned?.length });
-    await ctx.reply(`📊 آمار ربات:\nکاربران: ${members?.length || 0}\nکاربران بلاک‌شده: ${banned?.length || 0}`, {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
+    await ctx.telegram.editMessageText(ctx.chat.id, editable.message_id, null, 'Video added to queue!');
+  } catch (editError) {
+    await ctx.reply('Video added to queue!');
+  }
+  if (ReplyDB[ctx.from.id]) await ctx.telegram.deleteMessage(ctx.chat.id, ReplyDB[ctx.from.id]).catch(() => {});
+  const reply = await ctx.reply(messageText, { reply_markup: Markup.inlineKeyboard(markup), reply_to_message_id: ctx.message.message_id });
+  ReplyDB[ctx.from.id] = reply.message_id;
+});
+
+// مدیریت عکس (تامبنیل)
+bot.on('photo', async (ctx) => {
+  await addUserToDatabase(ctx);
+  if ((await forceSub(ctx)) !== 200) return;
+  const editable = await ctx.reply('Saving thumbnail...', { reply_to_message_id: ctx.message.message_id });
+  try {
+    await setThumbnail(ctx.from.id, ctx.message.photo[ctx.message.photo.length - 1].file_id);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      editable.message_id,
+      null,
+      'Thumbnail saved!',
+      {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('Show Thumbnail', 'showThumbnail')],
+          [Markup.button.callback('Delete Thumbnail', 'deleteThumbnail')],
+        ]),
+      }
+    );
+  } catch (error) {
+    console.error('Thumbnail save error:', error);
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        editable.message_id,
+        null,
+        'Error saving thumbnail.'
+      );
+    } catch (editError) {
+      await ctx.reply('Error saving thumbnail.');
+    }
+  }
+});
+
+// دستور /settings
+bot.command('settings', async (ctx) => {
+  await addUserToDatabase(ctx);
+  if ((await forceSub(ctx)) !== 200) return; // اصلاح خطای نحوی: نقل‌قول اضافی حذف شد
+  const editable = await ctx.reply('Opening settings...');
+  await openSettings(ctx, editable);
+});
+
+// دستور /broadcast
+bot.command('broadcast', async (ctx) => {
+  if (ctx.from.id.toString() !== botOwner || !ctx.message.reply_to_message) return;
+  const broadcastMsg = ctx.message.reply_to_message;
+  const broadcastId = crypto.randomBytes(3).toString('hex');
+  const out = await ctx.reply('Broadcast Started! You will reply with log file when all the users are notified.');
+  const startTime = Date.now();
+  const totalUsers = await totalUsersCount();
+  let done = 0,
+    failed = 0,
+    success = 0;
+  broadcastIds[broadcastId] = { total: totalUsers, current: done, failed, success };
+
+  try {
+    await fs.writeFile(BROADCAST_LOG_FILE, '');
+    const users = await getAllUsers();
+    for (const user of users) {
+      const userId = user.id;
+      const { status, error } = await sendMsg(userId, broadcastMsg);
+      if (error) {
+        await fs.appendFile(BROADCAST_LOG_FILE, error);
+      }
+      if (status === 200) {
+        success++;
+      } else {
+        failed++;
+        if (status === 400) {
+          await deleteUser(userId);
+        }
+      }
+      done++;
+      broadcastIds[broadcastId] = { total: totalUsers, current: done, failed, success };
+    }
+
+    delete broadcastIds[broadcastId];
+    const completedIn = Math.floor((Date.now() - startTime) / 1000);
+    await ctx.telegram.deleteMessage(ctx.chat.id, out.message_id);
+
+    if (failed === 0) {
+      await ctx.reply(
+        `Broadcast completed in \`${completedIn}s\`\n\nTotal users ${totalUsers}.\nTotal done ${done}, ${success} success and ${failed} failed.`,
+        { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      await ctx.replyWithDocument(
+        { source: BROADCAST_LOG_FILE },
+        {
+          caption: `Broadcast completed in \`${completedIn}s\`\n\nTotal users ${totalUsers}.\nTotal done ${done}, ${success} success and ${failed} failed.`,
+          parse_mode: 'Markdown',
+          reply_to_message_id: ctx.message.message_id,
+        }
+      );
+    }
+  } catch (error) {
+    console.error('Broadcast error:', error);
+    await ctx.reply(`Error sending broadcast: ${error.message}`);
+  } finally {
+    await fs.unlink(BROADCAST_LOG_FILE).catch(() => {});
+  }
+});
+
+async function sendMsg(userId, message) {
+  try {
+    if (broadcastAsCopy) {
+      await message.copy(userId);
+    } else {
+      await message.forward(userId);
+    }
+    return { status: 200, error: null };
+  } catch (error) {
+    if (error.response?.error_code === 429) {
+      await new Promise((resolve) => setTimeout(resolve, error.response.parameters.retry_after * 1000));
+      return sendMsg(userId, message);
+    }
+    if ([403, 400].includes(error.response?.error_code)) {
+      return { status: 400, error: `${userId} : ${error.message}\n` };
+    }
+    return { status: 500, error: `${userId} : ${error.stack}\n` };
+  }
+}
+
+// دستور /status
+bot.command('status', async (ctx) => {
+  if (ctx.from.id.toString() !== botOwner) return;
+  try {
+    const disk = await si.fsSize();
+    const cpu = await si.cpu();
+    const mem = await si.mem();
+    const totalUsers = await totalUsersCount();
+    const total = (disk[0].size / 1024 ** 3).toFixed(2);
+    const used = (disk[0].used / 1024 ** 3).toFixed(2);
+    const free = ((disk[0].size - disk[0].used) / 1024 ** 3).toFixed(2);
+    const cpuUsage = cpu.currentLoad;
+    const ramUsage = (mem.used / mem.total) * 100;
+    await ctx.reply(
+      `**Total Disk:** ${total} GB\n**Used:** ${used} GB\n**Free:** ${free} GB\n**CPU Usage:** ${cpuUsage.toFixed(2)}%\n**RAM Usage:** ${ramUsage.toFixed(2)}%\n**Users:** ${totalUsers}`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (error) {
+    console.error('Status error:', error);
+    await ctx.reply('Error fetching status.');
+  }
+});
+
+// دستور /check
+bot.command('check', async (ctx) => {
+  if (ctx.from.id.toString() !== botOwner || !ctx.message.text.split(' ')[1]) return;
+  try {
+    const userId = parseInt(ctx.message.text.split(' ')[1]);
+    const user = await ctx.telegram.getChat(userId);
+    const settings = await db.collection('users').findOne({ id: userId });
+    await ctx.reply(
+      `**Name:** [${user.first_name}](tg://user?id=${userId})\n**Username:** @${user.username || 'None'}\n**Upload as Doc:** ${settings?.upload_as_doc || false}\n**Generate Screenshots:** ${settings?.generate_ss || false}\n**Generate Sample Video:** ${settings?.generate_sample_video || false}`,
+      { parse_mode: 'Markdown', disable_web_page_preview: true }
+    );
+  } catch (error) {
+    console.error('Check error:', error);
+    await ctx.reply('Error fetching user details.');
+  }
+});
+
+// مدیریت Callbackها
+bot.action('mergeNow', async (ctx) => {
+  const userId = ctx.from.id;
+  if (!QueueDB[userId] || QueueDB[userId].length < 2) {
+    await ctx.answerCbQuery('Need at least 2 videos to merge!', { show_alert: true });
+    await ctx.deleteMessage();
+    return;
+  }
+
+  await ctx.editMessageText('Preparing to merge videos...');
+  const userDir = await ensureDir(userId);
+  const inputFile = path.join(userDir, 'input.txt');
+  const videoPaths = [];
+
+  for (const messageId of QueueDB[userId].sort()) {
+    try {
+      const message = await ctx.telegram.getMessages(ctx.chat.id, messageId);
+      const video = message[0].video;
+      const filePath = path.join(userDir, `${messageId}.${FormatDB[userId]}`);
+      await ctx.editMessageText(`Downloading ${video.file_name || 'unnamed_file'}...`);
+      const startTime = Date.now() / 1000;
+      await downloadFile(ctx, video.file_id, filePath, (current, total) =>
+        progressForTelegraf(current, total, 'Downloading', ctx, startTime)
+      );
+      videoPaths.push(`file '${filePath}'`);
+    } catch (error) {
+      console.error('Download error:', error);
+      QueueDB[userId] = QueueDB[userId].filter((id) => id !== messageId);
+      await ctx.editMessageText('File skipped!');
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+
+  if (videoPaths.length < 2) {
+    await ctx.editMessageText('Not enough valid videos to merge!');
+    await deleteAll(userDir);
+    delete QueueDB[userId];
+    delete FormatDB[userId];
+    return;
+  }
+
+  await fs.writeFile(inputFile, videoPaths.join('\n'));
+  const mergedVidPath = await mergeVideo(inputFile, userId, ctx, FormatDB[userId]);
+  if (!mergedVidPath) {
+    await deleteAll(userDir);
+    delete QueueDB[userId];
+    delete FormatDB[userId];
+    return;
+  }
+
+  const fileSize = (await fs.stat(mergedVidPath)).size;
+  if (fileSize > 2097152000) {
+    await ctx.editMessageText(`File too large (${humanbytes(fileSize)}). Uploading to Streamtape...`);
+    await uploadToStreamtape(mergedVidPath, ctx, fileSize);
+    await deleteAll(userDir);
+    delete QueueDB[userId];
+    delete FormatDB[userId];
+    return;
+  }
+
+  await ctx.editMessageText(
+    'Do you want to rename the file?',
+    {
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback('Rename File', 'renameFile_Yes')],
+        [Markup.button.callback('Keep Default', 'renameFile_No')],
+      ]),
+    }
+  );
+});
+
+bot.action('cancelProcess', async (ctx) => {
+  await ctx.editMessageText('Cancelling process...');
+  await deleteAll(path.join(downPath, ctx.from.id.toString()));
+  delete QueueDB[ctx.from.id];
+  delete FormatDB[ctx.from.id];
+  await ctx.editMessageText('Process cancelled!');
+});
+
+bot.action('showThumbnail', async (ctx) => {
+  try {
+    const fileId = await getThumbnail(ctx.from.id);
+    if (fileId) {
+      await ctx.answerCbQuery('Sending thumbnail...');
+      await ctx.telegram.sendPhoto(ctx.chat.id, fileId, {
+        reply_markup: Markup.inlineKeyboard([[Markup.button.callback('Delete Thumbnail', 'deleteThumbnail')]]),
+      });
+    } else {
+      await ctx.answerCbQuery('No thumbnail found!', { show_alert: true });
+    }
+  } catch (error) {
+    console.error('Show thumbnail error:', error);
+    await ctx.answerCbQuery('Error fetching thumbnail.');
+  }
+});
+
+bot.action('deleteThumbnail', async (ctx) => {
+  try {
+    await setThumbnail(ctx.from.id, null);
+    await ctx.editMessageText('Thumbnail deleted!');
+  } catch (error) {
+    console.error('Delete thumbnail error:', error);
+    try {
+      await ctx.editMessageText('Error deleting thumbnail.');
+    } catch (editError) {
+      await ctx.reply('Error deleting thumbnail.');
+    }
+  }
+});
+
+bot.action('showQueueFiles', async (ctx) => {
+  try {
+    const markup = await makeButtons(ctx, ctx.message, QueueDB);
+    await ctx.editMessageText('Queue Files:', { reply_markup: Markup.inlineKeyboard(markup) });
+  } catch (error) {
+    console.error('Show queue error:', error);
+    await ctx.answerCbQuery('Error showing queue files.');
+  }
+});
+
+bot.action(/showFileName_(\d+)/, async (ctx) => {
+  const messageId = parseInt(ctx.match[1]);
+  try {
+    const message = await ctx.telegram.getMessages(ctx.chat.id, messageId);
+    const media = message[0].video || message[0].document;
+    if (media) {
+      await ctx.answerCbQuery(`File: ${media.file_name || 'unnamed_file'}`, { show_alert: true });
+    } else {
+      await ctx.answerCbQuery('File not found!', { show_alert: true });
+    }
+  } catch (error) {
+    console.error('Show file name error:', error);
+    await ctx.answerCbQuery('Error fetching file.');
+  }
+});
+
+bot.action('openSettings', async (ctx) => {
+  await openSettings(ctx, ctx.message);
+});
+
+bot.action('refreshFsub', async (ctx) => {
+  if ((await forceSub(ctx)) === 200) {
+    await ctx.editMessageText(
+      `Hi Unkil, I am Video Merge Bot!\nI can Merge Multiple Videos in One Video. Video Formats should be same.\n\nMade by @Savior_128`,
+      {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.url('Developer - @Savior_128', 'https://t.me/Savior_128')],
+          [
+            Markup.button.url('Support Group', 'https://t.me/Savior_128'),
+            Markup.button.url('Bots Channel', 'https://t.me/Discovery_Updates'),
+          ],
+          [Markup.button.callback('Open Settings', 'openSettings')],
+          [Markup.button.callback('Close', 'closeMeh')],
+        ]),
+      }
+    );
+  }
+});
+
+bot.action(/renameFile_(Yes|No)/, async (ctx) => {
+  const userId = ctx.from.id;
+  if (!QueueDB[userId] || QueueDB[userId].length === 0) {
+    await ctx.answerCbQuery('Queue is empty!', { show_alert: true });
+    return;
+  }
+
+  let mergedVidPath = path.join(downPath, userId.toString(), `[@Savior_128]_Merged.${FormatDB[userId]}`);
+  if (ctx.match[1] === 'Yes') {
+    await ctx.editMessageText('Send the new file name:');
+    const newName = await waitForText(ctx);
+    if (newName) {
+      const safeName = newName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+      const newPath = path.join(downPath, userId.toString(), `${safeName}.${FormatDB[userId]}`);
+      await fs.rename(mergedVidPath, newPath);
+      mergedVidPath = newPath;
+      await ctx.editMessageText(`Renamed to ${safeName}.${FormatDB[userId]}`);
+    } else {
+      await ctx.editMessageText('No name provided. Using default name.');
+    }
+  }
+
+  await ctx.editMessageText('Extracting video data...');
+  const { duration, width, height } = await getVideoMetadata(mergedVidPath);
+  const fileSize = (await fs.stat(mergedVidPath)).size;
+  let thumbnail = await getThumbnail(userId);
+  if (thumbnail) {
+    const thumbPath = path.join(downPath, userId.toString(), 'thumbnail.jpg');
+    await downloadFile(ctx, thumbnail, thumbPath);
+    await sharp(thumbPath).resize(width, height).jpeg().toFile(thumbPath);
+    thumbnail = thumbPath;
+  } else {
+    thumbnail = await generateThumbnail(mergedVidPath, userId, duration);
+  }
+
+  const shouldGenerateSs = await getGenerateSs(userId);
+  const shouldGenerateSample = await getGenerateSampleVideo(userId);
+  if (shouldGenerateSs) {
+    const screenshots = await generateScreenshots(mergedVidPath, path.join(downPath, userId.toString()), 4, duration);
+    if (screenshots.length > 0) {
+      await ctx.telegram.sendMediaGroup(
+        ctx.chat.id,
+        screenshots.map((s) => ({ type: 'photo', media: { source: s } }))
+      );
+    }
+  }
+  if (shouldGenerateSample) {
+    const samplePath = await cutSmallVideo(
+      mergedVidPath,
+      path.join(downPath, userId.toString()),
+      0,
+      Math.min(30, duration),
+      FormatDB[userId]
+    );
+    if (samplePath) {
+      await ctx.telegram.sendVideo(ctx.chat.id, { source: samplePath }, { caption: 'Sample Video' });
+    }
+  }
+
+  const startTime = Date.now() / 1000;
+  await uploadVideo(ctx, mergedVidPath, width, height, duration, thumbnail, fileSize, startTime);
+  await deleteAll(path.join(downPath, userId.toString()));
+  delete QueueDB[userId];
+  delete FormatDB[userId];
+});
+
+// توابع کمکی
+async function downloadFile(ctx, fileId, filePath, progressCallback) {
+  try {
+    const file = await ctx.telegram.getFile(fileId);
+    const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      onDownloadProgress: (progressEvent) => {
+        if (progressCallback && progressEvent.total) {
+          progressCallback(progressEvent.loaded, progressEvent.total);
+        }
+      },
+    });
+    const writer = response.data.pipe(require('fs').createWriteStream(filePath));
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
     });
   } catch (error) {
-    console.error('Error in stats:', error);
-    await ctx.reply('❌ خطا در بارگذاری آمار. لطفاً دوباره امتحان کنید.', { parse_mode: 'HTML' });
+    console.error('Download file error:', error);
+    throw error;
   }
-});
+}
 
-// مدیریت callback_query
-bot.on('callback_query', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  const data = ctx.callbackQuery.data;
-  const messageId = ctx.callbackQuery.message.message_id;
-  const chatId = ctx.chat.id;
-
-  console.log(`Callback query from ${fromId}: ${data}`);
-
-  if (fromId !== adminId) {
-    console.log(`Unauthorized callback query by ${fromId}`);
-    return ctx.answerCbQuery('🚫 دسترسی ندارید.');
+async function deleteAll(root) {
+  try {
+    if (await fs.access(root).then(() => true).catch(() => false)) {
+      await fs.rm(root, { recursive: true, force: true });
+      return true;
+    }
+    console.log(`Folder '${root}' does not exist.`);
+    return false;
+  } catch (error) {
+    console.error(`Error deleting folder '${root}':`, error);
+    return false;
   }
+}
 
-  const settingKeys = ['sticker', 'file', 'aks', 'music', 'film', 'voice', 'link', 'forward', 'join', 'pm_forward', 'pm_resani'];
-  if (settingKeys.includes(data)) {
+async function openSettings(ctx, message) {
+  try {
+    if (!db) throw new Error('Database not connected');
+    const uploadAsDoc = await getUploadAsDoc(ctx.from.id);
+    const generateSampleVideo = await getGenerateSampleVideo(ctx.from.id);
+    const generateSs = await getGenerateSs(ctx.from.id);
+    const settingsText = 'Here You Can Change or Configure Your Settings:';
+    const markup = Markup.inlineKeyboard([
+      [Markup.button.callback(`Upload as ${uploadAsDoc ? 'Document' : 'Video'} ✅`, 'triggerUploadMode')],
+      [Markup.button.callback(`Generate Sample Video ${generateSampleVideo ? '✅' : '❌'}`, 'triggerGenSample')],
+      [Markup.button.callback(`Generate Screenshots ${generateSs ? '✅' : '❌'}`, 'triggerGenSS')],
+      [Markup.button.callback('Show Thumbnail', 'showThumbnail')],
+      [Markup.button.callback('Show Queue Files', 'showQueueFiles')],
+      [Markup.button.callback('Close', 'closeMeh')],
+    ]);
+
     try {
-      const currentStatus = await getSetting(data, '✅');
-      const newStatus = currentStatus === '✅' ? '⛔️' : '✅';
-      await saveSetting(data, newStatus);
-      const settings = {
-        sticker: await getSetting('sticker', '✅'),
-        file: await getSetting('file', '✅'),
-        aks: await getSetting('aks', '✅'),
-        music: await getSetting('music', '✅'),
-        film: await getSetting('film', '✅'),
-        voice: await getSetting('voice', '✅'),
-        link: await getSetting('link', '✅'),
-        forward: await getSetting('forward', '✅'),
-        join: await getSetting('join', '✅'),
-        pm_forward: await getSetting('pm_forward', '⛔️'),
-        pm_resani: await getSetting('pm_resani', '✅'),
-      };
-      const buttons = {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: `استیکر: ${settings.sticker}`, callback_data: 'sticker' }],
-            [{ text: `فایل: ${settings.file}`, callback_data: 'file' }],
-            [{ text: `عکس: ${settings.aks}`, callback_data: 'aks' }],
-            [{ text: `موزیک: ${settings.music}`, callback_data: 'music' }],
-            [{ text: `ویدیو: ${settings.film}`, callback_data: 'film' }],
-            [{ text: `ویس: ${settings.voice}`, callback_data: 'voice' }],
-            [{ text: `لینک: ${settings.link}`, callback_data: 'link' }],
-            [{ text: `فوروارد: ${settings.forward}`, callback_data: 'forward' }],
-            [{ text: `عضویت گروه: ${settings.join}`, callback_data: 'join' }],
-            [{ text: `فوروارد پیام: ${settings.pm_forward}`, callback_data: 'pm_forward' }],
-            [{ text: `پیام‌رسانی: ${settings.pm_resani}`, callback_data: 'pm_resani' }],
-          ],
-        },
-      };
-      await ctx.telegram.editMessageText(chatId, messageId, undefined, '🔧 تنظیمات به‌روزرسانی شد:', {
-        parse_mode: 'HTML',
-        reply_markup: buttons.reply_markup,
-      });
-      await ctx.answerCbQuery(`وضعیت ${data} به ${newStatus} تغییر کرد.`);
-    } catch (error) {
-      console.error('Error in callback_query:', error);
-      await ctx.answerCbQuery('❌ خطا در به‌روزرسانی تنظیمات.');
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        message.message_id,
+        null,
+        settingsText,
+        { reply_markup: markup }
+      );
+    } catch (editError) {
+      console.error('Edit message error:', editError);
+      await ctx.reply(settingsText, { reply_markup: markup });
+    }
+  } catch (error) {
+    console.error('Settings error:', error);
+    try {
+      await ctx.reply('Error opening settings.');
+    } catch (replyError) {
+      console.error('Reply error:', replyError);
     }
   }
-});
+}
 
-// پاسخ به دکمه‌ها و مدیریت
-bot.on('text', async (ctx) => {
-  const chatId = ctx.chat.id;
-  const fromId = ctx.from.id.toString();
-  const text = ctx.message.text.trim(); // حذف فاصله‌های اضافی
-  const firstName = ctx.from.first_name || 'کاربر';
-  const command = await getSetting('command', 'none');
-
-  console.log(`Text received from ${fromId}: "${text}", command: ${command}, adminId: ${adminId}`);
-
-  // اضافه کردن دکمه
-  if (command === 'add button' && fromId === adminId) {
-    const buttons = await getButtons();
-    if (buttons.find(b => b.text === text)) {
-      await ctx.reply('⏸ دکمه با این نام وجود دارد.', { parse_mode: 'HTML', ...buttonBack });
-    } else {
-      await saveSetting('command', 'add button2');
-      await saveSetting('wait', text);
-      await ctx.reply('⏸ دکمه کجا اضافه شود؟', { parse_mode: 'HTML', ...buttonPosition });
-    }
-    return;
-  }
-
-  // انتخاب موقعیت دکمه
-  if (command === 'add button2' && fromId === adminId && ['🔼بالا', '🔽پایین'].includes(text)) {
-    await saveSetting('command', 'add button3');
-    await saveSetting('position', text === '🔼بالا' ? 'top' : 'bottom');
-    await ctx.reply('⏸ پاسخ دکمه را ارسال کنید (متن، عکس، ویس، یا ویدیو):', {
-      parse_mode: 'HTML',
-      ...buttonBack,
-    });
-    return;
-  }
-
-  // حذف دکمه
-  if (command === 'rem button' && fromId === adminId) {
-    if (text !== '↩️بازگشت') {
-      await removeButton(text);
-      await saveSetting('command', 'none');
-      await ctx.reply('⏸ دکمه حذف شد.', { parse_mode: 'HTML', ...buttonDokme });
-    } else {
-      await saveSetting('command', 'none');
-      await ctx.reply('🔲 به مدیریت دکمه‌ها بازگشتید.', { parse_mode: 'HTML', ...buttonDokme });
-    }
-    return;
-  }
-
-  // بازگشت
-  if (text === '↩️بازگشت' && fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('✴️ به بخش مدیریت بازگشتید.', {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
-    });
-    return;
-  }
-
-  // مدیریت پیام همگانی ساده
-  if (command === 's2a' && fromId === adminId) {
-    await saveSetting('command', 'none');
-    await ctx.reply('⤴️ پیام در صف ارسال قرار گرفت.', {
-      parse_mode: 'HTML',
-      ...buttonOfficial,
-    });
-    const { data: users } = await supabase.from('users').select('user_id');
-    for (const user of users || []) {
-      try {
-        await ctx.telegram.sendMessage(user.user_id, text, { parse_mode: 'HTML' });
-      } catch (error) {
-        console.error(`Error sending message to ${user.user_id}:`, error);
+async function waitForText(ctx) {
+  return new Promise((resolve) => {
+    const handler = (ctx) => {
+      if (ctx.message.text) {
+        bot.removeListener('text', handler);
+        resolve(ctx.message.text);
       }
-    }
-    return;
+    };
+    bot.on('text', handler);
+    setTimeout(() => {
+      bot.removeListener('text', handler);
+      resolve(null);
+    }, 300000);
+  });
+}
+
+async function generateThumbnail(filePath, userId, duration) {
+  try {
+    const thumbPath = path.join(downPath, userId.toString(), 'thumbnail.jpg');
+    const ttl = Math.floor(Math.random() * duration);
+    await runFffmpegCommand([
+      'ffmpeg',
+      '-i',
+      filePath,
+      '-ss',
+      ttl.toString(),
+      '-vframes',
+      '1',
+      thumbPath,
+    ]);
+    await sharp(thumbPath).jpeg().toFile(thumbPath);
+    return thumbPath;
+  } catch (error) {
+    console.error('Thumbnail error:', error);
+    return null;
   }
+}
 
-  // پاسخ به دکمه‌های پویا
-  const buttons = await getButtons();
-  const button = buttons.find(b => b.text === text);
-  if (button) {
-    if (button.type === 'text') {
-      await ctx.reply(button.content, { parse_mode: 'HTML' });
-    } else if (button.type === 'photo') {
-      await ctx.telegram.sendPhoto(chatId, button.content, { caption: button.caption });
-    } else if (button.type === 'video') {
-      await ctx.telegram.sendVideo(chatId, button.content, { caption: button.caption });
-    } else if (button.type === 'voice') {
-      await ctx.telegram.sendVoice(chatId, button.content, { caption: button.caption });
-    }
-    return;
+async function getVideoMetadata(filePath) {
+  try {
+    const { stdout } = await execPromise(`ffprobe -v error -show_entries format=duration:stream=width,height -of json ${filePath}`);
+    const data = JSON.parse(stdout);
+    return {
+      duration: Math.round(parseFloat(data.format.duration)),
+      width: data.streams[0].width || 100,
+      height: data.streams[0].height || 100,
+    };
+  } catch (error) {
+    console.error('Metadata error:', error);
+    return { duration: 1, width: 100, height: 100 };
   }
+}
 
-  // مدیریت پیام‌های کاربران
-  if (ctx.chat.type === 'private' && fromId !== adminId) {
-    if (await isUserBlocked(fromId)) {
-      await ctx.reply('🚫 شما از ربات بلاک شده‌اید.', { parse_mode: 'HTML' });
-      return;
-    }
-    const pmResani = await getSetting('pm_resani', '✅');
-    const sendText = await getSetting('send_text', '<b>Sent To My Admin!</b>');
-
-    if (pmResani === '✅') {
-      await ctx.telegram.sendMessage(adminId, `پیام از [${firstName}](tg://user?id=${fromId}):\n${text}`, {
-        parse_mode: 'Markdown',
-      });
-      await ctx.reply(sendText, { parse_mode: 'HTML' });
-    }
-  }
-});
-
-// آپلود برای دکمه
-bot.on('message', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  const messageId = ctx.message.message_id;
-  const command = await getSetting('command', 'none');
-  const wait = await getSetting('wait', '');
-  const position = await getSetting('position', 'bottom');
-
-  console.log(`Message received from ${fromId}, command: ${command}`);
-
-  // فوروارد همگانی
-  if (command === 's2a fwd' && fromId === adminId) {
-    await ctx.reply('🦂 پیام در صف ارسال قرار گرفت.', {
-      ...buttonOfficial,
-    });
-    const { data: users } = await supabase.from('users').select('user_id');
-    for (const user of users || []) {
-      try {
-        await ctx.telegram.forwardMessage(user.user_id, ctx.chat.id, messageId);
-      } catch (error) {
-        console.error(`Error forwarding to ${user.user_id}:`, error);
-      }
-    }
-    await saveSetting('command', 'none');
-    return;
-  }
-
-  // افزودن پاسخ دکمه
-  if (command === 'add button3' && fromId === adminId) {
-    let type, content, caption = '';
-    if (ctx.message.text) {
-      type = 'text';
-      content = ctx.message.text;
-    } else if (ctx.message.photo) {
-      type = 'photo';
-      content = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-      caption = ctx.message.caption || '';
-    } else if (ctx.message.video) {
-      type = 'video';
-      content = ctx.message.video.file_id;
-      caption = ctx.message.caption || '';
-    } else if (ctx.message.voice) {
-      type = 'voice';
-      content = ctx.message.voice.file_id;
-      caption = ctx.message.caption || '';
-    } else {
-      await ctx.reply('⏸ فقط متن، عکس، ویس، یا ویدیو مجاز است.', { parse_mode: 'HTML', ...buttonBack });
-      return;
-    }
-    await addButton(wait, type, content, caption, position);
-    await saveSetting('command', 'none');
-    await ctx.reply('🔥 دکمه ساخته شد.', { parse_mode: 'HTML', ...buttonDokme });
+bot.action('triggerUploadMode', async (ctx) => {
+  try {
+    const uploadAsDoc = await getUploadAsDoc(ctx.from.id);
+    await setUploadAsDoc(ctx.from.id, !uploadAsDoc);
+    await openSettings(ctx, ctx.message);
+  } catch (error) {
+    console.error('Toggle upload mode error:', error);
+    await ctx.answerCbQuery('Error updating settings.');
   }
 });
 
-// بلاک و آنبلاک
-bot.command('ban', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  if (fromId !== adminId || !ctx.message.reply_to_message) {
-    return ctx.reply('🚫 دسترسی ندارید یا پیامی برای پاسخ انتخاب نشده.', { parse_mode: 'HTML' });
+bot.action('triggerGenSample', async (ctx) => {
+  try {
+    const generateSampleVideo = await getGenerateSampleVideo(ctx.from.id);
+    await setGenerateSampleVideo(ctx.from.id, !generateSampleVideo);
+    await openSettings(ctx, ctx.message);
+  } catch (error) {
+    console.error('Toggle sample video error:', error);
+    await ctx.answerCbQuery('Error updating settings.');
   }
-  const targetId = ctx.message.reply_to_message.from.id.toString();
-  if (targetId === adminId) {
-    return ctx.reply('❌ نمی‌توانید خودتان را بلاک کنید.', { parse_mode: 'HTML' });
-  }
-  await blockUser(targetId);
-  await ctx.reply('🔒 کاربر بلاک شد.', { parse_mode: 'HTML' });
 });
 
-bot.command('unban', async (ctx) => {
-  const fromId = ctx.from.id.toString();
-  if (fromId !== adminId || !ctx.message.reply_to_message) {
-    return ctx.reply('🚫 دسترسی ندارید یا پیامی برای پاسخ انتخاب نشده.', { parse_mode: 'HTML' });
+bot.action('triggerGenSS', async (ctx) => {
+  try {
+    const generateSs = await getGenerateSs(ctx.from.id);
+    await setGenerateSs(ctx.from.id, !generateSs);
+    await openSettings(ctx, ctx.message);
+  } catch (error) {
+    console.error('Toggle SS error:', error);
+    await ctx.answerCbQuery('Error updating settings.');
   }
-  const targetId = ctx.message.reply_to_message.from.id.toString();
-  await unblockUser(targetId);
-  await ctx.reply('✅ کاربر آنبلاک شد.', { parse_mode: 'HTML' });
 });
 
-// مدیریت Webhook
+bot.action('closeMeh', async (ctx) => {
+  try {
+    await ctx.deleteMessage();
+    if (ctx.message.reply_to_message) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.reply_to_message.message_id);
+    }
+  } catch (error) {
+    console.error('Close error:', error);
+  }
+});
+
+// راه‌اندازی ربات
+(async () => {
+  try {
+    // اتصال به دیتابیس
+    await connectMongoDB();
+    
+    // بررسی VERCEL_URL
+    console.log('VERCEL_URL:', process.env.VERCEL_URL);
+    if (!process.env.VERCEL_URL) {
+      throw new Error('VERCEL_URL is not defined in environment variables');
+    }
+
+    // تنظیم Webhook
+    const webhookUrl = `https://${process.env.VERCEL_URL}/api`;
+    console.log('Setting webhook with URL:', webhookUrl);
+    await bot.telegram.setWebhook(webhookUrl);
+    console.log('Webhook set successfully to:', webhookUrl);
+
+    // تأیید تنظیم Webhook
+    const webhookInfo = await bot.telegram.getWebhookInfo();
+    console.log('Webhook info:', webhookInfo);
+
+    // اطلاع‌رسانی به صاحب ربات
+    if (botOwner) {
+      await bot.telegram.sendMessage(
+        botOwner,
+        `Bot started successfully!\nWebhook set to: ${webhookUrl}\nWebhook Info: ${JSON.stringify(webhookInfo, null, 2)}`
+      ).catch((err) => console.error('Failed to notify owner:', err));
+    }
+
+    console.log('Bot started');
+  } catch (error) {
+    console.error('Startup error:', error);
+
+    // اطلاع‌رسانی به صاحب ربات در صورت بروز خطا
+    if (botOwner) {
+      await bot.telegram.sendMessage(
+        botOwner,
+        `Failed to start bot!\nError: ${error.message}`
+      ).catch((err) => console.error('Failed to notify owner:', err));
+    }
+
+    process.exit(1);
+  }
+})();
+// مدیریت Webhook برای Vercel
 module.exports = async (req, res) => {
   try {
     await bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Error handling webhook:', error);
+    console.error('Webhook error:', error);
     res.status(500).send('Error');
   }
 };
